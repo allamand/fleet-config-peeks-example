@@ -1,0 +1,61 @@
+# KRO-managed spoke cluster provisioning values (tenant: default).
+#
+# Clusters here are provisioned via the KRO ResourceGraphDefinition
+# (EksclusterWithVpc) + ACK, driven by the `clusters-kro` ApplicationSet
+# (gitops/bootstrap/clusters-kro.yaml). The appset globs
+#   fleet/spoke-values/tenants/*/kro-clusters/clusters/*.json
+# for one trigger file PER cluster, then reads the per-cluster spec from THIS
+# file (its `valueFiles` entry resolves the tenant from the JSON path).
+#
+# ZERO-PAT NOTE: these two spokes are PRE-COMMITTED directly in this public
+# repo. ArgoCD reads the public repo read-only, sees dev.json + prod.json and
+# this values.yaml, and reconciles both spokes. No write credential / PAT is
+# needed for this path. A PAT is only required if you instead let the installer
+# task `spokes:apply` GENERATE and PUSH these files at install time (Case B in
+# the README).
+#
+# accountId / managementAccountId are DELIBERATELY OMITTED: the kro-clusters
+# chart defaults both to global.accountId, which the clusters-kro appset
+# propagates from the hub cluster-secret's real AWS account annotation at
+# reconcile time. That keeps a real 12-digit account number OUT of this public
+# repo. Same reasoning for domainName (inherited / per-env) and any ARNs.
+
+clusters:
+  dev:
+    clusterName: dev
+    tenant: default
+    environment: dev
+    provider: kro-ack
+    fleetMember: spoke
+    region: us-west-2
+    k8sVersion: "1.31"
+    # EKS Auto Mode behaviour: the hub/RGD provisions Auto Mode by default;
+    # this is the per-spoke knob the kro-clusters chart actually exposes.
+    # true keeps the built-in general-purpose NodePool (Karpenter) alongside
+    # the always-on "system" pool.
+    enableGeneralPurposeNodePool: true
+    # VPC CIDR — example value, DISJOINT from the hub and from the prod spoke
+    # (so the two can be peered later without collision). /16 split into the
+    # subnet layout the EksclusterWithVpc graph expects.
+    cidr:
+      vpcCidr: "10.1.0.0/16"
+      publicSubnet1Cidr: "10.1.1.0/24"
+      publicSubnet2Cidr: "10.1.2.0/24"
+      privateSubnet1Cidr: "10.1.11.0/24"
+      privateSubnet2Cidr: "10.1.12.0/24"
+  prod:
+    clusterName: prod
+    tenant: default
+    environment: prod
+    provider: kro-ack
+    fleetMember: spoke
+    region: us-west-2
+    k8sVersion: "1.31"
+    enableGeneralPurposeNodePool: true
+    # Distinct /16 from dev and from the hub.
+    cidr:
+      vpcCidr: "10.2.0.0/16"
+      publicSubnet1Cidr: "10.2.1.0/24"
+      publicSubnet2Cidr: "10.2.2.0/24"
+      privateSubnet1Cidr: "10.2.11.0/24"
+      privateSubnet2Cidr: "10.2.12.0/24"

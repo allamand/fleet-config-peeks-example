@@ -1,0 +1,7 @@
+# Hub (control-plane) cluster configuration. Mirrors the base fleet repo's
+# gitops/fleet/hub/values.yaml: the hub registers itself via externalSecret mode.
+externalSecret:
+  enabled: true
+  labels:
+    environment: control-plane
+    tenant: control-plane

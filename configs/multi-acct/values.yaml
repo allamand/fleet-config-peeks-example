@@ -1,0 +1,18 @@
+# ACK CARM (Cross-Account Resource Management) mapping: spoke namespace -> AWS
+# account ID. The hub's ACK controllers render an IAMRoleSelector per service
+# from this map and assume the <resourcePrefix>-cluster-mgmt-<svc> roles when
+# provisioning each spoke. Only KRO spokes need this (ACK does the provisioning).
+#
+# Read at repo ROOT by the appset-chart external per-addon overlay tier
+# ($overlay/configs/multi-acct/values.yaml), NOT under gitops/.
+#
+# PUBLIC-REPO / ZERO-SECRET: a real 12-digit account ID is intentionally NOT
+# committed here. Fill these in your own (Case B / Case C) repo, or let the
+# installer write them, with YOUR account ID:
+#
+#   clusters:
+#     dev: "<account-id>"      # your 12-digit AWS account ID (single account: same for all)
+#     prod: "<account-id>"
+#
+# Left empty here so the public example carries no account identity.
+clusters: {}

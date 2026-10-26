@@ -1,0 +1,9 @@
+# Fleet member registration for the KRO spoke "prod".
+# See fleet/members/dev/values.yaml for how the fleet-secret chart consumes this.
+clusterName: prod
+mode: externalSecret
+externalSecret:
+  enabled: true
+labels:
+  environment: prod
+  tenant: default
