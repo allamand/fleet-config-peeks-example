@@ -142,18 +142,22 @@ spokes:
 ### The PAT
 
 - **Scope — minimal:**
-  - public fleet repo → `public_repo`
-  - private fleet repo → `repo`
-- **Where it lives:** in **AWS Secrets Manager**, as a dedicated secret. Reference the
-  secret by **name/ARN** in your config (a **placeholder** — `<secret-name>` — never the
-  token value). **Never** paste a PAT into config, into this repo, or into chat.
+  - public fleet repo → classic `public_repo` (fine-grained: Contents Read-only)
+  - private fleet repo → classic `repo` (fine-grained: Contents Read and write)
+- **Where it lives:** in **AWS Secrets Manager**, as the property `git_token` of the
+  per-hub secret `<hub-cluster-name>/secrets` (the exact `remoteRef.property` the platform
+  resolves), or a dedicated secret `<secret-name>` you point an ExternalSecret at. Store
+  only the **token** — a **placeholder** (`<PAT>`) here, **never** the real value in
+  config, in this repo, or in chat.
 - **Who reads it, and when:**
-  - `spokes:apply` (stage 2) reads it **at push time** — clone → write JSONs → commit → push;
+  - the generative spoke push (stage 2) reads it **at push time** — clone → write JSONs → commit → push;
   - **ArgoCD** reads it **continuously** to reconcile (only needed if the repo is private;
     a public repo is read anonymously).
-- **The config field that references it:** the Secrets Manager secret name/ARN goes in the
-  config, not the token. The secret holds the git credential (token); the install task and
-  ArgoCD resolve it at runtime.
+- **How it reaches the tooling — not through config.** There is **no credential field in
+  `config.local.yaml`** (`config.schema.json` exposes only `fleetRepo.{url,revision,basepath}`).
+  The token is surfaced as the ArgoCD `repository` Secret `argocd/fleet-config-repo`
+  (created directly or projected from Secrets Manager by ESO — see Case C), which both
+  ArgoCD and the provider's push read at runtime. The config carries only the repo URL.
 
 ---
 
@@ -161,16 +165,116 @@ spokes:
 
 **When:** your fleet repo must not be public at all.
 
-**How it works:** `fleetRepo.url` is a **private** repo. A credential is now needed for
-**both** directions — ArgoCD to **read/clone** and reconcile, and (if you use Case B)
-`spokes:apply` to **push**. Two credential sources, pick one:
+**How it works:** `fleetRepo.url` is a **private** repo, so a credential is now needed
+for **both** directions — ArgoCD to **read/clone** and reconcile, and the provider's
+own GitOps push (hub self-adoption / any generative spoke push) to **write**. There is
+**no credential field in the config** — the config carries only `fleetRepo.url`,
+`revision`, `basepath` (`config.schema.json`, and the provider reads exactly
+`yq '.fleetRepo.url // .repo.url'` — nothing resolves a token from config). The
+credential is a **Kubernetes Secret ArgoCD recognises**, named **`fleet-config-repo` in
+the `argocd` namespace**, with the ArgoCD `repository` label. The provider reads that
+same secret back for its own clone/push, and **refuses** the pivot if it is absent.
 
-- **Reuse the ArgoCD-registered repo credential** `argocd/fleet-config-repo` — the platform
-  is consumer-agnostic: it adopts the repo credential **you** wired, it does not mint an
-  identity. ArgoCD already holds enough to read/reconcile the fleet repo; the same secret can
-  serve `spokes:apply`'s clone/push.
-- **Or a dedicated AWS Secrets Manager secret** `<secret-name>` (same mechanics as Case B) —
-  referenced by name/ARN in config, read by `spokes:apply` at push and by ArgoCD continuously.
+Below are the three concrete things you must do. Use placeholders only — **never put a
+real token in config, in this repo, or in chat.**
+
+### (a) Store the PAT — minimal scope, where it lives
+
+Mint a Git Personal Access Token that can **read the private repo** (and push, if you
+let the installer generate spokes):
+
+- **GitHub classic PAT:** scope `repo` (a classic PAT has no read-only tier for a
+  private repo). For a **public** fleet repo only `public_repo` is needed — but a public
+  repo is Case A/B, not Case C.
+- **GitHub fine-grained PAT:** repository access limited to the one fleet repo, permission
+  **Contents: Read and write** (Read-only if ArgoCD only ever reads and you never push
+  generated spokes).
+
+Keep the token in **AWS Secrets Manager**, not on disk. The platform's own ESO wiring
+reads the token from the property **`git_token`** of the per-hub secret
+**`<hub-cluster-name>/secrets`** (that is the exact `remoteRef.property` the chart uses).
+So either reuse that key, or create a dedicated secret and point your own ExternalSecret at it:
+
+```bash
+# Option 1 — add git_token to the hub's existing <hub>/secrets (merge, don't clobber):
+aws secretsmanager get-secret-value --secret-id "<hub-cluster-name>/secrets" \
+  --query SecretString --output text \
+  | jq --arg t "<PAT>" '. + {git_token: $t}' \
+  | aws secretsmanager put-secret-value --secret-id "<hub-cluster-name>/secrets" \
+      --secret-string file:///dev/stdin
+
+# Option 2 — a dedicated secret you reference from your own ExternalSecret (see (b)):
+aws secretsmanager create-secret --name "<secret-name>" \
+  --secret-string '{"git_token":"<PAT>"}'
+```
+
+> The platform never stores the repo **URL or username** in Secrets Manager — only the
+> token (`git_token`). The URL/username are supplied when the ArgoCD secret is rendered
+> (see (b)). `<PAT>` and `<secret-name>` are placeholders.
+
+### (b) Create the ArgoCD `repository` secret
+
+ArgoCD authenticates a private repo clone from an Opaque Secret in the `argocd`
+namespace carrying the label `argocd.argoproj.io/secret-type: repository` and
+`url`/`username`/`password` (`password` = the PAT). This is exactly the shape the
+platform itself seeds. Two ways:
+
+**Direct (`kubectl apply`)** — simplest, token is set once at apply time:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fleet-config-repo
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  type: git
+  url: https://github.com/<org>/<private-fleet-repo>.git
+  username: <org>          # any non-empty value; GitHub ignores it when a PAT is the password
+  password: <PAT>          # the Personal Access Token — placeholder, never the real value
+```
+
+**Or via ESO from Secrets Manager** — the token self-heals on rotation (this mirrors the
+platform's own `argocd-gitlab-repo-creds` chart, which projects `git_token` → the ArgoCD
+`repository` secret):
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: fleet-config-repo
+  namespace: argocd
+spec:
+  secretStoreRef:
+    name: aws-secrets-manager      # your ClusterSecretStore
+    kind: ClusterSecretStore
+  refreshInterval: "5m"
+  target:
+    name: fleet-config-repo
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: repository
+      data:
+        type: git
+        url: "https://github.com/<org>/<private-fleet-repo>.git"
+        username: "<org>"
+        password: "{{ .GIT_PASSWORD }}"
+  data:
+    - secretKey: GIT_PASSWORD
+      remoteRef:
+        key: <secret-name>          # or <hub-cluster-name>/secrets
+        property: git_token
+```
+
+### (c) Reference it from the config — you don't
+
+**There is nothing to add to `config.local.yaml` for the credential.** The config block
+stays exactly as in Case A/B — only the URL changes to the private repo:
 
 ```yaml
 # config.local.yaml (extract)
@@ -178,9 +282,20 @@ fleetRepo:
   url: https://github.com/<org>/<private-fleet-repo>.git
   revision: main
   basepath: ""
-# plus the credential reference (ArgoCD argocd/fleet-config-repo, or a dedicated
-# Secrets Manager secret named <secret-name>) — never the token value itself.
+# No credential key here. The private fleet repo is wired entirely by the ArgoCD
+# Secret argocd/fleet-config-repo (created in (b)) — directly, or via the ESO that
+# projects it from Secrets Manager. config.schema.json exposes only
+# fleetRepo.{url,revision,basepath}; it has no token/secret field.
 ```
+
+**Who reads what, and when:**
+
+- **ArgoCD** reads `argocd/fleet-config-repo` **continuously** to clone and reconcile the
+  private fleet repo (this is the only credential a private repo needs just to run).
+- The **kind-kro-ack provider** reads that *same* `argocd/fleet-config-repo` secret
+  (`username`/`password`) **at pivot/push time** for its own GitOps writes, and **refuses
+  with an explicit error if the secret is absent** — it never mints an identity or builds
+  a URL of its own; it reuses the credential **you** registered.
 
 ---
 
