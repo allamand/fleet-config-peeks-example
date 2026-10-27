@@ -309,3 +309,96 @@ repo (Case B `spokes:apply`, or a private repo in Case C) still needs a write cr
 
 In short: **public = no creds to read** (hub + pre-committed spokes); **a PAT is still
 needed to push** generated spokes.
+
+---
+
+## Addon enablement (`enabled-addons` overlays)
+
+Everything above is about **which spokes** exist and **how the repo is read**. This
+section is about **which addons run on the hub** (control-plane) itself. That set is
+driven entirely by **two `enabled-addons.yaml` files in this repo** — there is **no RGD
+and no annotation** involved in choosing them.
+
+### How an addon gets turned on
+
+Both files are read by the hub's **`hub-fleet-secret` ApplicationSet**, which merges them
+into **`.Values.enabledAddons`** and stamps, for every key set to `true`, an
+**`enable_<addon>` label on the hub's cluster-secret**. The platform's ApplicationSets
+select on those labels, so the label is the switch: `foo: true` → `enable_foo` label
+present → the `foo` addon's Application syncs. Flip it to `false` → the label is gone →
+the addon is not deployed. The value flows strictly from these repo files; nothing is
+decided by a ResourceGraphDefinition or a live `kubectl annotate` (an annotation would be
+reverted on the next reconcile — the repo file is the source of truth).
+
+### The two slots — exact paths and why there are two
+
+The `hub-fleet-secret` appset reads **two** overlay slots and merges them, so the two
+files live at **different paths** and are **not interchangeable**:
+
+| Layer | Slot | basepath | Path in this repo |
+|-------|------|----------|-------------------|
+| **CORE** (agent-free) | `$values` | `gitops/` | `gitops/overlays/environments/control-plane/enabled-addons.yaml` |
+| **AGENT / OAP** | `$overlay` | `""` (repo root) | `overlays/environments/control-plane/enabled-addons.yaml` |
+
+- **CORE** (`$values`, basepath `gitops/`) is **always read**. It carries the
+  **agent-free** platform: crossplane, backstage, keycloak, kargo, the `argo_*` stack,
+  external-secrets / external-dns, observability, ACK/ML knobs, etc. This is the layer
+  that **unblocks the spokes and the platform addons**. The base solution is kept
+  agent-free here on purpose.
+- **AGENT / OAP** (`$overlay`, basepath `""`, i.e. the **repo root**) is merged **last**,
+  **on top** of CORE. It carries the Open Agentic Platform layer:
+  `agent_platform`, `bifrost`, `agent_gateway`, `oam_components`, `otel_collector`,
+  `langfuse`, `agent_core`, `amp_incident`, `aiops_agent`. It is a **separate slot** so
+  the generic base stays agent-free and the agent layer can be wired in (or left out)
+  independently.
+
+The two slots are distinct precisely so you can run the full platform **without** the
+agent layer by simply not wiring the overlay slot — the CORE file stands alone.
+
+### Enabling / disabling an addon
+
+1. Open the `enabled-addons.yaml` for the **right slot** (CORE for platform addons, AGENT
+   for the OAP keys above).
+2. Set the addon's key to `true` (enable) or `false` (disable).
+3. `git commit && git push` to your copy of this repo.
+4. ArgoCD reconciles: the `enable_<addon>` label appears/disappears on the hub
+   cluster-secret and the addon's Application is created/removed.
+
+### Important: the AGENT layer only sets labels — OAP is **double-gated**
+
+Enabling the agent keys in the AGENT overlay **only stamps the `enable_*` labels**. It
+does **not**, by itself, deploy the Open Agentic Platform. OAP is actually applied **only
+when the `agenticRepo` block is present in `config.local.yaml`** — that block is the gate
+for the `agentic:bootstrap-direct` task, which is what `kubectl apply`s the OAP
+`agent-platform-app`.
+
+So there are **two independent conditions**, and you need **both** for OAP to run:
+
+- **AGENT overlay keys = `true`** → the `enable_*` labels are present (this file), **and**
+- **`agenticRepo` set in `config.local.yaml`** → `agentic:bootstrap-direct` applies the
+  OAP `agent-platform-app`.
+
+If the AGENT labels are on but **`agenticRepo` is absent from the config**, the labels are
+stamped but **OAP is never applied** — this is **harmless** (the selectors find no OAP
+Applications to sync; nothing breaks). Conversely, `agenticRepo` without the AGENT labels
+leaves the OAP ComponentDefinitions/selectors unlabelled. Set **both** to actually get the
+agent platform.
+
+### The chain, end to end
+
+```
+enabled-addons.yaml (this repo, 2 slots)
+   ├─ CORE  : gitops/overlays/environments/control-plane/enabled-addons.yaml   ($values, basepath gitops/)
+   └─ AGENT : overlays/environments/control-plane/enabled-addons.yaml          ($overlay, basepath "")
+        │
+        ▼
+   hub-fleet-secret ApplicationSet   (merges both into .Values.enabledAddons)
+        │
+        ▼
+   enable_<addon> labels on the hub cluster-secret
+        │
+        ├─ platform/agent Applications select on the labels and sync
+        │
+        └─ (OAP only) agent-platform-app is applied by agentic:bootstrap-direct
+                         ─ IF AND ONLY IF agenticRepo is set in config.local.yaml
+```
