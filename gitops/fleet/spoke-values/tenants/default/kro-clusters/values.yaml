@@ -21,28 +21,6 @@
 # repo. Same reasoning for domainName (inherited / per-env) and any ARNs.
 
 clusters:
-  dev:
-    clusterName: dev
-    tenant: default
-    environment: dev
-    provider: kro-ack
-    fleetMember: spoke
-    region: us-west-2
-    k8sVersion: "1.31"
-    # EKS Auto Mode behaviour: the hub/RGD provisions Auto Mode by default;
-    # this is the per-spoke knob the kro-clusters chart actually exposes.
-    # true keeps the built-in general-purpose NodePool (Karpenter) alongside
-    # the always-on "system" pool.
-    enableGeneralPurposeNodePool: true
-    # VPC CIDR — example value, DISJOINT from the hub and from the prod spoke
-    # (so the two can be peered later without collision). /16 split into the
-    # subnet layout the EksclusterWithVpc graph expects.
-    cidr:
-      vpcCidr: "10.1.0.0/16"
-      publicSubnet1Cidr: "10.1.1.0/24"
-      publicSubnet2Cidr: "10.1.2.0/24"
-      privateSubnet1Cidr: "10.1.11.0/24"
-      privateSubnet2Cidr: "10.1.12.0/24"
   prod:
     clusterName: prod
     tenant: default
