@@ -1,0 +1,15 @@
+# Fleet member registration for the KRO spoke "peeks-a-dev" (owned by hub peeks-a-hub).
+#
+# Discovered only by peeks-a-hub: the fleet-secrets ApplicationSet globs
+# fleet/members/<resource_prefix>/*/values.yaml, and peeks-a-hub's resource_prefix
+# annotation is "peeks-a", so it reads this subtree only. KRO spokes use
+# "externalSecret" mode: the EksclusterWithVpc RGD writes <cluster>/config to AWS
+# Secrets Manager and the chart's ExternalSecret builds the ArgoCD cluster-
+# registration Secret from it.
+clusterName: peeks-a-dev
+mode: externalSecret
+externalSecret:
+  enabled: true
+labels:
+  environment: dev
+  tenant: default

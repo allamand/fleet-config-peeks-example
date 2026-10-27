@@ -1,0 +1,5 @@
+# Per-cluster platform-manifests overlay for spoke "peeks-a-dev".
+# Disable HuggingFaceModel CRs on KRO spokes: the HuggingFaceModel CRD (kro.run)
+# is not installed on spokes, so an empty list makes the chart's guard render
+# nothing (these models target GPU/Trainium clusters, not spokes).
+huggingfaceModels: []

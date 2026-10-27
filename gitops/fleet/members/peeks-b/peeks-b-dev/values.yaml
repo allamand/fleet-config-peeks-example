@@ -1,0 +1,9 @@
+# Fleet member registration for the KRO spoke "peeks-b-dev" (owned by hub peeks-b-hub).
+# Discovered only by peeks-b-hub (resource_prefix "peeks-b"). See peeks-a-dev for details.
+clusterName: peeks-b-dev
+mode: externalSecret
+externalSecret:
+  enabled: true
+labels:
+  environment: dev
+  tenant: default

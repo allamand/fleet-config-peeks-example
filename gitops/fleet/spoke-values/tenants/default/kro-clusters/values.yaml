@@ -37,3 +37,43 @@ clusters:
       publicSubnet2Cidr: "10.2.2.0/24"
       privateSubnet1Cidr: "10.2.11.0/24"
       privateSubnet2Cidr: "10.2.12.0/24"
+
+  # --- Prefixed per-hub dev spokes (multi-hub fleet) ---
+  # Both entries live in this ONE shared values.yaml; the clusters-kro chart gates
+  # `eq $name global.targetCluster`, and targetCluster = the trigger's clusterName.
+  # Because each hub discovers only its OWN trigger (resource_prefix sub-dir), peeks-a-hub
+  # activates ONLY peeks-a-dev and peeks-b-hub ONLY peeks-b-dev — no collision.
+  # peeks-a-dev inherits the old single "dev" CIDR (10.1.0.0/16).
+  peeks-a-dev:
+    clusterName: peeks-a-dev
+    tenant: default
+    environment: dev
+    provider: kro-ack
+    fleetMember: spoke
+    region: us-west-2
+    k8sVersion: "1.31"
+    enableGeneralPurposeNodePool: true
+    # Distinct /16 from prod (10.2) and from peeks-b-dev (10.3) and the hub.
+    cidr:
+      vpcCidr: "10.1.0.0/16"
+      publicSubnet1Cidr: "10.1.1.0/24"
+      publicSubnet2Cidr: "10.1.2.0/24"
+      privateSubnet1Cidr: "10.1.11.0/24"
+      privateSubnet2Cidr: "10.1.12.0/24"
+
+  peeks-b-dev:
+    clusterName: peeks-b-dev
+    tenant: default
+    environment: dev
+    provider: kro-ack
+    fleetMember: spoke
+    region: us-west-2
+    k8sVersion: "1.31"
+    enableGeneralPurposeNodePool: true
+    # Distinct /16 from prod (10.2) and from peeks-a-dev (10.1) and the hub.
+    cidr:
+      vpcCidr: "10.3.0.0/16"
+      publicSubnet1Cidr: "10.3.1.0/24"
+      publicSubnet2Cidr: "10.3.2.0/24"
+      privateSubnet1Cidr: "10.3.11.0/24"
+      privateSubnet2Cidr: "10.3.12.0/24"
