@@ -1,4 +1,4 @@
-# peeks-a-hub ONLY -- close Langfuse self-signup (AppSec hardening, complements the ALB
+# peeks-a-hub ONLY -- close Langfuse self-signup (security hardening, complements the ALB
 # allowlist). Per-addon, cluster-keyed overlay file read by the OAP appset-chart at
 # $overlay/overlays/clusters/<cluster>/langfuse/values.yaml.
 #

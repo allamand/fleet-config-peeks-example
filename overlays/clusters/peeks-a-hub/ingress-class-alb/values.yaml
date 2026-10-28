@@ -1,5 +1,5 @@
-# peeks-a-hub ONLY -- source-IP allowlist for the shared "platform" ALB (AppSec finding:
-# unauthenticated public endpoint). Per-addon, cluster-keyed overlay file read by the
+# peeks-a-hub ONLY -- source-IP allowlist for the shared "platform" ALB (security hardening:
+# no unauthenticated public endpoint). Per-addon, cluster-keyed overlay file read by the
 # appset-chart at $overlay/overlays/clusters/<cluster>/<addon>/values.yaml.
 #
 # PREREQUISITES (both required, otherwise this file is a silent no-op):
@@ -13,29 +13,28 @@
 # SCOPE: peeks-a-hub has an internet-facing ALB with TLS on the ALB (insecure=false, no
 # CloudFront), so a client-IP allowlist applies directly. Do NOT copy this to a hub fronted
 # by a CloudFront VPC origin (internal ALB): the ALB sees CloudFront origin ENI IPs, so a
-# corp allowlist there would cut CloudFront. Group-wide by design: also gates Keycloak,
+# client allowlist there would cut CloudFront. Group-wide by design: also gates Keycloak,
 # Kargo, Argo Workflows and the agent gateway on this ALB.
 #
 # Both keys are concatenated by the chart (base + extra); YAML list or comma string.
 # One SG rule per CIDR per listener port (80+443) -> keep well under the 60-rule SG quota.
 
-# Base allowlist. ACCESS TEST: two /32 = the Cloud Desktop egress used to validate the
-# allowlist (curl from it -> 200, from anywhere else -> blocked). Replace/extend with the real
-# corp egress ranges once known. Everything not listed here is refused on 80 and 443.
+# Base allowlist: allowed operator egress (curl from it -> 200, from anywhere else ->
+# blocked). Replace/extend with your own egress ranges. Everything not listed here is
+# refused on 80 and 443.
 # The hub's own NAT egress MUST stay listed: in-cluster callers reach the public host too
 # (e.g. Langfuse / Argo Workflows / Kargo validate tokens against the Keycloak issuer
 # https://<hub-host>/keycloak/realms/platform, hairpinning through the NAT). Without it, SSO
 # breaks for everyone even from an allowed IP. Re-check after a VPC/NAT rebuild.
 inboundCidrs:
-  - "54.240.197.225/32"   # Cloud Desktop egress (rotates between 2 IPs)
-  - "54.240.197.233/32"   # Cloud Desktop egress (rotates between 2 IPs)
-  - "34.215.153.232/32"   # peeks-a-hub NAT gateway egress (in-cluster -> public host)
+  - "54.240.197.225/32"   # allowed operator egress
+  - "54.240.197.233/32"   # allowed operator egress
+  - "34.215.153.232/32"   # hub NAT egress (required for in-cluster SSO via public host)
 
 # Ad-hoc additions appended after the base (leave the base untouched).
-# NOTE: checkip.amazonaws.com can report a different egress than the one an in-region
-# endpoint sees. The two entries below are the source IPs actually observed on this ALB's
-# ENIs (VPC flow log REJECT records), not the checkip value.
+# NOTE: an IP-echo service can report a different egress than the source IP an in-region
+# endpoint actually sees; allowlist the source IP the ALB sees.
 extraInboundCidrs:
-  - "205.251.233.176/32"  # cloud desktop egress toward us-west-2 (observed via flow logs)
-  - "205.251.233.236/32"  # cloud desktop egress toward us-west-2 (observed via flow logs)
-  # - 203.0.113.42/32  # my home IP when off-VPN
+  - "205.251.233.176/32"  # allowed operator egress (as seen by the ALB)
+  - "205.251.233.236/32"  # allowed operator egress (as seen by the ALB)
+  # - 203.0.113.42/32  # example: an additional operator IP
