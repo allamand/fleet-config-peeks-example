@@ -3,9 +3,10 @@
 # $overlay/overlays/clusters/<cluster>/langfuse/values.yaml.
 #
 # PREREQUISITE: the OAP agent-platform-addons Application on this hub must carry the
-# fleet-config overlay coordinates (overlayRepoURLGit/Revision/BasePath; OAP bootstrap
-# OVERLAY_REPO_URL/OVERLAY_REPO_REVISION/OVERLAY_REPO_BASEPATH). Today they are empty on
-# peeks-a-hub, so this file is a silent no-op until that is wired.
+# fleet-config overlay coordinates (valuesObject overlayRepoURLGit/Revision/BasePath).
+# OAP agentic:bootstrap fills them from config, else the hub cluster-secret overlay_repo_*,
+# else the hub's fleetRepoURL (OAP fix/oap-overlay-from-hub-annotations). Until then (or the
+# one-shot live patch of that Application) this file is a silent no-op.
 #
 # The chart already maps keycloak.disableSignup -> AUTH_DISABLE_SIGNUP; no upstream change.
 # Helm deep-merges the keycloak map, so registry issuerUrl/secretManagerKey are kept.

@@ -6,8 +6,9 @@
 #   1. appmod ingress-class-alb chart renders inboundCidrs/extraInboundCidrs into
 #      IngressClassParams.spec.inboundCIDRs (appmod feat/alb-inbound-cidrs) on the
 #      revision this hub tracks (addonsRepoRevision).
-#   2. The fleet-config overlay is wired on this hub's cluster-secret
-#      (overlay_repo_url/revision/basepath) so cluster-addons adds the $overlay source.
+#   2. cluster-addons reads this repo as its $overlay: either overlay_repo_url is wired on
+#      the hub cluster-secret, or (appmod fix/overlay-fallback-fleetrepo) it falls back to the
+#      hub's fleetRepoURL, which already points here.
 #
 # SCOPE: peeks-a-hub has an internet-facing ALB with TLS on the ALB (insecure=false, no
 # CloudFront), so a client-IP allowlist applies directly. Do NOT copy this to a hub fronted
@@ -18,11 +19,16 @@
 # Both keys are concatenated by the chart (base + extra); YAML list or comma string.
 # One SG rule per CIDR per listener port (80+443) -> keep well under the 60-rule SG quota.
 
-# Base allowlist: corp egress ranges.
-# PLACEHOLDER -- the AppSec report gives no verifiable corp CIDR. Replace with the real
-# ranges before enabling. TEST-NET-2 (RFC 5737) is used so nothing real is opened by mistake.
+# Base allowlist. ACCESS TEST: single /32 = the Cloud Desktop egress used to validate the
+# allowlist (curl from it -> 200, from anywhere else -> blocked). Replace/extend with the real
+# corp egress ranges once known. Everything not listed here is refused on 80 and 443.
+# The hub's own NAT egress MUST stay listed: in-cluster callers reach the public host too
+# (e.g. Langfuse / Argo Workflows / Kargo validate tokens against the Keycloak issuer
+# https://<hub-host>/keycloak/realms/platform, hairpinning through the NAT). Without it, SSO
+# breaks for everyone even from an allowed IP. Re-check after a VPC/NAT rebuild.
 inboundCidrs:
-  - "198.51.100.0/24"   # PLACEHOLDER -- replace with corp egress CIDR(s)
+  - "54.240.197.225/32"   # Cloud Desktop egress (access test)
+  - "34.215.153.232/32"   # peeks-a-hub NAT gateway egress (in-cluster -> public host)
 
 # Ad-hoc additions appended after the base (leave the base untouched).
 extraInboundCidrs: []
