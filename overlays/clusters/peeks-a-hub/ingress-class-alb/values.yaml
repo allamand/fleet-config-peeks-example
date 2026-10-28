@@ -1,0 +1,29 @@
+# peeks-a-hub ONLY -- source-IP allowlist for the shared "platform" ALB (AppSec finding:
+# unauthenticated public endpoint). Per-addon, cluster-keyed overlay file read by the
+# appset-chart at $overlay/overlays/clusters/<cluster>/<addon>/values.yaml.
+#
+# PREREQUISITES (both required, otherwise this file is a silent no-op):
+#   1. appmod ingress-class-alb chart renders inboundCidrs/extraInboundCidrs into
+#      IngressClassParams.spec.inboundCIDRs (appmod feat/alb-inbound-cidrs) on the
+#      revision this hub tracks (addonsRepoRevision).
+#   2. The fleet-config overlay is wired on this hub's cluster-secret
+#      (overlay_repo_url/revision/basepath) so cluster-addons adds the $overlay source.
+#
+# SCOPE: peeks-a-hub has an internet-facing ALB with TLS on the ALB (insecure=false, no
+# CloudFront), so a client-IP allowlist applies directly. Do NOT copy this to a hub fronted
+# by a CloudFront VPC origin (internal ALB): the ALB sees CloudFront origin ENI IPs, so a
+# corp allowlist there would cut CloudFront. Group-wide by design: also gates Keycloak,
+# Kargo, Argo Workflows and the agent gateway on this ALB.
+#
+# Both keys are concatenated by the chart (base + extra); YAML list or comma string.
+# One SG rule per CIDR per listener port (80+443) -> keep well under the 60-rule SG quota.
+
+# Base allowlist: corp egress ranges.
+# PLACEHOLDER -- the AppSec report gives no verifiable corp CIDR. Replace with the real
+# ranges before enabling. TEST-NET-2 (RFC 5737) is used so nothing real is opened by mistake.
+inboundCidrs:
+  - "198.51.100.0/24"   # PLACEHOLDER -- replace with corp egress CIDR(s)
+
+# Ad-hoc additions appended after the base (leave the base untouched).
+extraInboundCidrs: []
+  # - 203.0.113.42/32  # my home IP when off-VPN (curl -s https://checkip.amazonaws.com)
