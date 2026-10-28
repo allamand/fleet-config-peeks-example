@@ -25,6 +25,7 @@ clusters:
     clusterName: prod
     tenant: default
     environment: prod
+    deletionPolicy: retain
     provider: kro-ack
     fleetMember: spoke
     region: us-west-2
