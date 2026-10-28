@@ -1,40 +1,7 @@
-# peeks-a-hub ONLY -- source-IP allowlist for the shared "platform" ALB (security hardening:
-# no unauthenticated public endpoint). Per-addon, cluster-keyed overlay file read by the
-# appset-chart at $overlay/overlays/clusters/<cluster>/<addon>/values.yaml.
-#
-# PREREQUISITES (both required, otherwise this file is a silent no-op):
-#   1. appmod ingress-class-alb chart renders inboundCidrs/extraInboundCidrs into
-#      IngressClassParams.spec.inboundCIDRs (appmod feat/alb-inbound-cidrs) on the
-#      revision this hub tracks (addonsRepoRevision).
-#   2. cluster-addons reads this repo as its $overlay: either overlay_repo_url is wired on
-#      the hub cluster-secret, or (appmod fix/overlay-fallback-fleetrepo) it falls back to the
-#      hub's fleetRepoURL, which already points here.
-#
-# SCOPE: peeks-a-hub has an internet-facing ALB with TLS on the ALB (insecure=false, no
-# CloudFront), so a client-IP allowlist applies directly. Do NOT copy this to a hub fronted
-# by a CloudFront VPC origin (internal ALB): the ALB sees CloudFront origin ENI IPs, so a
-# client allowlist there would cut CloudFront. Group-wide by design: also gates Keycloak,
-# Kargo, Argo Workflows and the agent gateway on this ALB.
-#
-# Both keys are concatenated by the chart (base + extra); YAML list or comma string.
-# One SG rule per CIDR per listener port (80+443) -> keep well under the 60-rule SG quota.
-
-# Base allowlist: allowed operator egress (curl from it -> 200, from anywhere else ->
-# blocked). Replace/extend with your own egress ranges. Everything not listed here is
-# refused on 80 and 443.
-# The hub's own NAT egress MUST stay listed: in-cluster callers reach the public host too
-# (e.g. Langfuse / Argo Workflows / Kargo validate tokens against the Keycloak issuer
-# https://<hub-host>/keycloak/realms/platform, hairpinning through the NAT). Without it, SSO
-# breaks for everyone even from an allowed IP. Re-check after a VPC/NAT rebuild.
 inboundCidrs:
-  - "54.240.197.225/32"   # allowed operator egress
-  - "54.240.197.233/32"   # allowed operator egress
-  - "34.215.153.232/32"   # hub NAT egress (required for in-cluster SSO via public host)
-
-# Ad-hoc additions appended after the base (leave the base untouched).
-# NOTE: an IP-echo service can report a different egress than the source IP an in-region
-# endpoint actually sees; allowlist the source IP the ALB sees.
+  - "54.240.197.225/32"
+  - "54.240.197.233/32"
+  - "34.215.153.232/32"
 extraInboundCidrs:
-  - "205.251.233.176/32"  # allowed operator egress (as seen by the ALB)
-  - "205.251.233.236/32"  # allowed operator egress (as seen by the ALB)
-  # - 203.0.113.42/32  # example: an additional operator IP
+  - "205.251.233.176/32"
+  - "205.251.233.236/32"

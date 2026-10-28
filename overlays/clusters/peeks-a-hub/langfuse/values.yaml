@@ -1,19 +1,2 @@
-# peeks-a-hub ONLY -- close Langfuse self-signup (security hardening, complements the ALB
-# allowlist). Per-addon, cluster-keyed overlay file read by the OAP appset-chart at
-# $overlay/overlays/clusters/<cluster>/langfuse/values.yaml.
-#
-# PREREQUISITE: the OAP agent-platform-addons Application on this hub must carry the
-# fleet-config overlay coordinates (valuesObject overlayRepoURLGit/Revision/BasePath).
-# OAP agentic:bootstrap fills them from config, else the hub cluster-secret overlay_repo_*,
-# else the hub's fleetRepoURL (OAP fix/oap-overlay-from-hub-annotations). Until then (or the
-# one-shot live patch of that Application) this file is a silent no-op.
-#
-# The chart already maps keycloak.disableSignup -> AUTH_DISABLE_SIGNUP; no upstream change.
-# Helm deep-merges the keycloak map, so registry issuerUrl/secretManagerKey are kept.
-#
-# NOTE: "true" also blocks first-time SSO (JIT) account creation. Fine for this locked
-# personal demo (owner account already exists); never a workshop default. The
-# langfuse-seed CronJob only reads existing users (org/project memberships + OTEL API
-# key), it never creates users, so it keeps working with signup disabled.
 keycloak:
   disableSignup: "true"
