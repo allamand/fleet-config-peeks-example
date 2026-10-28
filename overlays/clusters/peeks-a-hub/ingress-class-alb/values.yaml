@@ -19,7 +19,7 @@
 # Both keys are concatenated by the chart (base + extra); YAML list or comma string.
 # One SG rule per CIDR per listener port (80+443) -> keep well under the 60-rule SG quota.
 
-# Base allowlist. ACCESS TEST: single /32 = the Cloud Desktop egress used to validate the
+# Base allowlist. ACCESS TEST: two /32 = the Cloud Desktop egress used to validate the
 # allowlist (curl from it -> 200, from anywhere else -> blocked). Replace/extend with the real
 # corp egress ranges once known. Everything not listed here is refused on 80 and 443.
 # The hub's own NAT egress MUST stay listed: in-cluster callers reach the public host too
@@ -27,7 +27,8 @@
 # https://<hub-host>/keycloak/realms/platform, hairpinning through the NAT). Without it, SSO
 # breaks for everyone even from an allowed IP. Re-check after a VPC/NAT rebuild.
 inboundCidrs:
-  - "54.240.197.225/32"   # Cloud Desktop egress (access test)
+  - "54.240.197.225/32"   # Cloud Desktop egress (rotates between 2 IPs)
+  - "54.240.197.233/32"   # Cloud Desktop egress (rotates between 2 IPs)
   - "34.215.153.232/32"   # peeks-a-hub NAT gateway egress (in-cluster -> public host)
 
 # Ad-hoc additions appended after the base (leave the base untouched).
