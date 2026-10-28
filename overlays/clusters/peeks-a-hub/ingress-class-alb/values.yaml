@@ -32,5 +32,10 @@ inboundCidrs:
   - "34.215.153.232/32"   # peeks-a-hub NAT gateway egress (in-cluster -> public host)
 
 # Ad-hoc additions appended after the base (leave the base untouched).
-extraInboundCidrs: []
-  # - 203.0.113.42/32  # my home IP when off-VPN (curl -s https://checkip.amazonaws.com)
+# NOTE: checkip.amazonaws.com can report a different egress than the one an in-region
+# endpoint sees. The two entries below are the source IPs actually observed on this ALB's
+# ENIs (VPC flow log REJECT records), not the checkip value.
+extraInboundCidrs:
+  - "205.251.233.176/32"  # cloud desktop egress toward us-west-2 (observed via flow logs)
+  - "205.251.233.236/32"  # cloud desktop egress toward us-west-2 (observed via flow logs)
+  # - 203.0.113.42/32  # my home IP when off-VPN
