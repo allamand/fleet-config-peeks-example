@@ -45,8 +45,6 @@ overlays/
     peeks-a-dev/platform-manifests/values.yaml   # per-cluster overlay (huggingfaceModels: [])
     peeks-b-dev/platform-manifests/values.yaml
     peeks-a-hub/ingress-class-alb/values.yaml    # hub ALB source-IP allowlist
-    peeks-a-hub/langfuse/values.yaml             # Langfuse self-signup off
-    peeks-b-hub/langfuse/values.yaml
 ```
 
 ### How ArgoCD reads this
