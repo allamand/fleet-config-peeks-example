@@ -1,3 +1,0 @@
-# Per-cluster platform-manifests overlay for spoke "prod". See the dev overlay
-# for why HuggingFaceModel CRs are disabled on KRO spokes.
-huggingfaceModels: []
