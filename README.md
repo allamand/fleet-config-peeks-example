@@ -138,13 +138,13 @@ spokes:
     region: us-west-2
     vpcCidr: 10.1.0.0/16
     tenant: default
-    kubernetesVersion: "1.31"
+    kubernetesVersion: "1.37"
     autoMode: true
   prod:
     region: us-west-2
     vpcCidr: 10.2.0.0/16
     tenant: default
-    kubernetesVersion: "1.31"
+    kubernetesVersion: "1.37"
     autoMode: true
 ```
 
