@@ -1,6 +1,7 @@
 # Fleet member registration for the KRO spoke "peeks-a-dev" (owned by hub peeks-a-hub).
 #
-# Discovered only by peeks-a-hub: the fleet-secrets ApplicationSet globs
+# Discovered only by peeks-a-hub: with fleet_scope_by_prefix: "true" on the hub
+# cluster-secret, the fleet-secrets ApplicationSet globs
 # fleet/members/<resource_prefix>/*/values.yaml, and peeks-a-hub's resource_prefix
 # annotation is "peeks-a", so it reads this subtree only. KRO spokes use
 # "externalSecret" mode: the EksclusterWithVpc RGD writes <cluster>/config to AWS

@@ -2,17 +2,25 @@
 #
 # Clusters here are provisioned via the KRO ResourceGraphDefinition
 # (EksclusterWithVpc) + ACK, driven by the `clusters-kro` ApplicationSet
-# (gitops/bootstrap/clusters-kro.yaml). The appset globs
-#   fleet/spoke-values/tenants/*/kro-clusters/clusters/*.json
-# for one trigger file PER cluster, then reads the per-cluster spec from THIS
-# file (its `valueFiles` entry resolves the tenant from the JSON path).
+# (gitops/bootstrap/clusters-kro.yaml). The appset globs one trigger file PER
+# cluster, then reads the per-cluster spec from THIS file (its `valueFiles` entry
+# resolves the tenant from the JSON path):
+#   - single hub (default):            fleet/spoke-values/tenants/*/kro-clusters/clusters/*.json
+#   - several hubs sharing this repo:  fleet/spoke-values/tenants/*/kro-clusters/clusters/<resource_prefix>/*.json
+#     (hub cluster-secret annotation fleet_scope_by_prefix: "true")
 #
-# ZERO-PAT NOTE: these two spokes are PRE-COMMITTED directly in this public
-# repo. ArgoCD reads the public repo read-only, sees dev.json + prod.json and
-# this values.yaml, and reconciles both spokes. No write credential / PAT is
-# needed for this path. A PAT is only required if you instead let the installer
-# task `spokes:apply` GENERATE and PUSH these files at install time (Case B in
-# the README).
+# This repo uses the multi-hub layout: each hub (resource_prefix peeks-a / peeks-b)
+# owns the triggers under clusters/<resource_prefix>/ and discovers only those.
+# Both entries below live in this ONE shared file; the kro-clusters chart renders
+# only the entry whose name equals global.targetCluster (the trigger's clusterName),
+# so each hub activates only its own spoke.
+#
+# ZERO-PAT NOTE: these spokes are PRE-COMMITTED directly in this public repo.
+# ArgoCD reads the public repo read-only, sees the trigger JSONs and this
+# values.yaml, and reconciles the spokes. No write credential / PAT is needed
+# for this path. A PAT is only required if you instead let the installer task
+# `spokes:apply` GENERATE and PUSH these files at install time (Case B in the
+# README).
 #
 # accountId / managementAccountId are DELIBERATELY OMITTED: the kro-clusters
 # chart defaults both to global.accountId, which the clusters-kro appset
@@ -21,30 +29,6 @@
 # repo. Same reasoning for domainName (inherited / per-env) and any ARNs.
 
 clusters:
-  prod:
-    clusterName: prod
-    tenant: default
-    environment: prod
-    deletionPolicy: retain
-    provider: kro-ack
-    fleetMember: spoke
-    region: us-west-2
-    k8sVersion: "1.31"
-    enableGeneralPurposeNodePool: true
-    # Distinct /16 from dev and from the hub.
-    cidr:
-      vpcCidr: "10.2.0.0/16"
-      publicSubnet1Cidr: "10.2.1.0/24"
-      publicSubnet2Cidr: "10.2.2.0/24"
-      privateSubnet1Cidr: "10.2.11.0/24"
-      privateSubnet2Cidr: "10.2.12.0/24"
-
-  # --- Prefixed per-hub dev spokes (multi-hub fleet) ---
-  # Both entries live in this ONE shared values.yaml; the clusters-kro chart gates
-  # `eq $name global.targetCluster`, and targetCluster = the trigger's clusterName.
-  # Because each hub discovers only its OWN trigger (resource_prefix sub-dir), peeks-a-hub
-  # activates ONLY peeks-a-dev and peeks-b-hub ONLY peeks-b-dev — no collision.
-  # peeks-a-dev inherits the old single "dev" CIDR (10.1.0.0/16).
   peeks-a-dev:
     clusterName: peeks-a-dev
     tenant: default
@@ -52,9 +36,9 @@ clusters:
     provider: kro-ack
     fleetMember: spoke
     region: us-west-2
-    k8sVersion: "1.31"
+    k8sVersion: "1.37"
     enableGeneralPurposeNodePool: true
-    # Distinct /16 from prod (10.2) and from peeks-b-dev (10.3) and the hub.
+    # Distinct /16 from peeks-b-dev (10.3) and from the hubs.
     cidr:
       vpcCidr: "10.1.0.0/16"
       publicSubnet1Cidr: "10.1.1.0/24"
@@ -69,9 +53,9 @@ clusters:
     provider: kro-ack
     fleetMember: spoke
     region: us-west-2
-    k8sVersion: "1.31"
+    k8sVersion: "1.37"
     enableGeneralPurposeNodePool: true
-    # Distinct /16 from prod (10.2) and from peeks-a-dev (10.1) and the hub.
+    # Distinct /16 from peeks-a-dev (10.1) and from the hubs.
     cidr:
       vpcCidr: "10.3.0.0/16"
       publicSubnet1Cidr: "10.3.1.0/24"

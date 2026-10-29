@@ -6,7 +6,8 @@ with the `kind-kro-ack` cluster provider. You point your install at this repo vi
 `fleetRepo.url` in `config.local.yaml`, and ArgoCD on the self-managed hub reconciles
 the spoke clusters declared here.
 
-This repo ships **two spokes pre-committed** — `dev` and `prod` — under
+This repo is shared by **two hubs** (`resource_prefix` `peeks-a` and `peeks-b`) and
+ships **one spoke per hub pre-committed** — `peeks-a-dev` and `peeks-b-dev` — under
 `gitops/fleet/spoke-values/tenants/default/kro-clusters/`. That is the **zero-PAT path**
 (Case A below): because the spoke declarations are already in the repo, ArgoCD only has
 to **read** them, which it does over an anonymous clone of a public repo. **No write
@@ -26,38 +27,49 @@ gitops/
     hub/
       values.yaml                 # hub (control-plane) self-registration
     members/                      # fleet membership -> ArgoCD cluster secrets
-      dev/values.yaml             #   spoke "dev"  (mode: externalSecret)
-      prod/values.yaml            #   spoke "prod" (mode: externalSecret)
+      peeks-a/peeks-a-dev/values.yaml   # spoke "peeks-a-dev" of hub peeks-a (mode: externalSecret)
+      peeks-b/peeks-b-dev/values.yaml   # spoke "peeks-b-dev" of hub peeks-b (mode: externalSecret)
     spoke-values/
       tenants/
         default/                  # tenant (neutral default, never "workshop")
           kro-clusters/
             clusters/
-              dev.json            # PRE-COMMITTED trigger  {"clusterName":"dev"}
-              prod.json           # PRE-COMMITTED trigger  {"clusterName":"prod"}
+              peeks-a/peeks-a-dev.json   # PRE-COMMITTED trigger {"clusterName":"peeks-a-dev"}
+              peeks-b/peeks-b-dev.json   # PRE-COMMITTED trigger {"clusterName":"peeks-b-dev"}
             values.yaml           # per-spoke specs (region, cidr, k8sVersion, ...)
 configs/
   multi-acct/
-    values.yaml                   # ACK CARM: spoke namespace -> account (placeholder)
+    values.yaml                   # ACK CARM for the hub only (spokes: see kro-clusters)
 overlays/
   clusters/
-    dev/platform-manifests/values.yaml   # per-cluster overlay (huggingfaceModels: [])
-    prod/platform-manifests/values.yaml
+    peeks-a-dev/platform-manifests/values.yaml   # per-cluster overlay (huggingfaceModels: [])
+    peeks-b-dev/platform-manifests/values.yaml
+    peeks-a-hub/ingress-class-alb/values.yaml    # hub ALB source-IP allowlist
 ```
 
 ### How ArgoCD reads this
 
 The hub's `clusters-kro` ApplicationSet
-(`gitops/bootstrap/clusters-kro.yaml` in appmod-blueprints) globs
+(`gitops/bootstrap/clusters-kro.yaml` in appmod-blueprints) globs one trigger JSON
+**per cluster**, then reads the matching per-spoke spec from
+`tenants/<tenant>/kro-clusters/values.yaml`. The `fleet-secrets` ApplicationSet globs the
+member files to register each spoke with ArgoCD. The JSON is intentionally minimal
+(`{"clusterName":"<name>"}`); the real spec lives in `values.yaml`.
+
+Several hubs share this repo on one branch. Each hub's cluster-secret carries
+`fleet_scope_by_prefix: "true"`, which inserts its `resource_prefix` into both globs:
 
 ```
-fleet/spoke-values/tenants/*/kro-clusters/clusters/*.json
+fleet/spoke-values/tenants/*/kro-clusters/clusters/<resource_prefix>/*.json
+fleet/members/<resource_prefix>/*/values.yaml
 ```
 
-— one trigger JSON **per cluster** — and for each one reads the matching per-spoke
-spec from `tenants/<tenant>/kro-clusters/values.yaml`. The `fleet-secrets` ApplicationSet
-globs `fleet/members/*/values.yaml` to register each spoke with ArgoCD. The JSON is
-intentionally minimal (`{"clusterName":"<name>"}`); the real spec lives in `values.yaml`.
+so hub `peeks-a` only sees `peeks-a-dev` and hub `peeks-b` only sees `peeks-b-dev`.
+Without that annotation (single-hub default) the globs are `clusters/*.json` and
+`members/*/values.yaml`, and the files sit directly under `clusters/` and `members/`.
+
+Per-cluster overlays (`overlays/clusters/<cluster>/<addon>/values.yaml`) are read only for
+clusters a hub has registered, so `peeks-a-hub/*` only affects hub `peeks-a`.
 
 **`accountId` is deliberately absent** from every spec here: the chart defaults it to
 `global.accountId`, which the hub propagates from its own cluster-secret (your real
@@ -71,9 +83,10 @@ account) at reconcile time — so no account number ever has to live in a public
 spoke declarations to be public.
 
 **How it works:** `fleetRepo.url` points at **this public repo** (your fork or this one).
-The spokes are already committed in `clusters/*.json` + `kro-clusters/values.yaml`. ArgoCD
-clones the public repo **read-only** (anonymous — no credential), sees the declarations,
-and reconciles `dev` and `prod`. **No PAT, no Secrets Manager entry, nothing to authorize.**
+The spokes are already committed in `clusters/<resource_prefix>/*.json` +
+`kro-clusters/values.yaml`. ArgoCD clones the public repo **read-only** (anonymous — no
+credential), sees the declarations, and each hub reconciles its own spoke (`peeks-a-dev`,
+`peeks-b-dev`). **No PAT, no Secrets Manager entry, nothing to authorize.**
 
 ```yaml
 # config.local.yaml (extract)
@@ -86,12 +99,14 @@ fleetRepo:
 
 **To add or change a spoke**, commit directly to the repo:
 
-1. add `gitops/fleet/spoke-values/tenants/default/kro-clusters/clusters/<name>.json`
-   containing `{"clusterName": "<name>"}`;
+1. add `gitops/fleet/spoke-values/tenants/default/kro-clusters/clusters/<resource_prefix>/<name>.json`
+   containing `{"clusterName": "<name>"}` (single hub without `fleet_scope_by_prefix`:
+   directly under `clusters/`);
 2. add a `<name>:` block under `clusters:` in
    `gitops/fleet/spoke-values/tenants/default/kro-clusters/values.yaml`
    (a disjoint `cidr.vpcCidr`, `region`, `k8sVersion`, ...);
-3. add `gitops/fleet/members/<name>/values.yaml` (copy `dev/`);
+3. add `gitops/fleet/members/<resource_prefix>/<name>/values.yaml` (copy
+   `peeks-a/peeks-a-dev/`; single hub: `members/<name>/values.yaml`);
 4. `git commit && git push` to your copy of this repo.
 
 ArgoCD picks the change up on its next sync. Editing the public repo yourself is the whole
@@ -121,13 +136,13 @@ spokes:
     region: us-west-2
     vpcCidr: 10.1.0.0/16
     tenant: default
-    kubernetesVersion: "1.31"
+    kubernetesVersion: "1.37"
     autoMode: true
   prod:
     region: us-west-2
     vpcCidr: 10.2.0.0/16
     tenant: default
-    kubernetesVersion: "1.31"
+    kubernetesVersion: "1.37"
     autoMode: true
 ```
 
