@@ -49,8 +49,6 @@ overlays/
   environments/
     control-plane/enabled-addons.yaml            # AGENT / OAP layer of the hubs
   clusters/
-    peeks-a-dev/platform-manifests/values.yaml   # per-cluster overlay (huggingfaceModels: [])
-    peeks-b-dev/platform-manifests/values.yaml
     peeks-a-hub/ingress-class-alb/values.yaml    # hub ALB source-IP allowlist
 ```
 
