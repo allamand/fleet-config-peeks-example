@@ -1,3 +1,0 @@
-# Per-cluster platform-manifests overlay for spoke "peeks-b-dev".
-# Disable HuggingFaceModel CRs on KRO spokes (CRD not installed on spokes).
-huggingfaceModels: []

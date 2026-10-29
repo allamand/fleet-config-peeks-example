@@ -37,13 +37,18 @@ gitops/
               peeks-a/peeks-a-dev.json   # PRE-COMMITTED trigger {"clusterName":"peeks-a-dev"}
               peeks-b/peeks-b-dev.json   # PRE-COMMITTED trigger {"clusterName":"peeks-b-dev"}
             values.yaml           # per-spoke specs (region, cidr, k8sVersion, ...)
+  overlays/
+    environments/
+      control-plane/enabled-addons.yaml  # CORE addon set of the hubs
+      dev/enabled-addons.yaml            # CORE addon set of every spoke labelled environment: dev
+      prod/enabled-addons.yaml           # CORE addon set of every spoke labelled environment: prod
 configs/
   multi-acct/
     values.yaml                   # ACK CARM for the hub only (spokes: see kro-clusters)
 overlays/
+  environments/
+    control-plane/enabled-addons.yaml            # AGENT / OAP layer of the hubs
   clusters/
-    peeks-a-dev/platform-manifests/values.yaml   # per-cluster overlay (huggingfaceModels: [])
-    peeks-b-dev/platform-manifests/values.yaml
     peeks-a-hub/ingress-class-alb/values.yaml    # hub ALB source-IP allowlist
 ```
 
@@ -417,3 +422,35 @@ enabled-addons.yaml (this repo, 2 slots)
         └─ (OAP only) agent-platform-app is applied by agentic:bootstrap-direct
                          ─ IF AND ONLY IF agenticRepo is set in config.local.yaml
 ```
+
+### Spoke addons: one file per environment
+
+Spokes follow the same rule as the hub, through the `fleet-secrets` ApplicationSet
+instead of `hub-fleet-secret`. A spoke's addon set is chosen by its **environment**, not by
+its name:
+
+```
+fleet/members/<prefix>/<cluster>/values.yaml   labels.environment: dev
+        │
+        ▼
+gitops/overlays/environments/dev/enabled-addons.yaml   ($values, basepath gitops/)
+        │
+        ▼
+enable_<addon> labels on the spoke cluster-secret (fleet-secret chart, ESO)
+```
+
+- `gitops/overlays/environments/dev/enabled-addons.yaml` and `.../prod/enabled-addons.yaml`
+  are verbatim copies of the appmod-blueprints files of the same path. A separate fleet repo
+  does **not** inherit them from appmod: if the file for an environment is missing here,
+  every spoke of that environment registers with **zero** addons, silently.
+- Every hub that uses this repo reads the same files, so `peeks-a-dev` and `peeks-b-dev` get
+  the same set. To change one spoke only, add
+  `gitops/overlays/clusters/<cluster>/addon-overrides.yaml` with an `enabledAddons:` map
+  (`false` turns a key off).
+- Keep `environment` identical in the member file (`labels.environment`, which picks the
+  `enabled-addons.yaml`) and in the spoke's entry in
+  `fleet/spoke-values/tenants/<tenant>/kro-clusters/values.yaml` (which becomes the
+  `environment` label of the cluster-secret and picks the per-addon values under
+  `overlays/environments/<env>/`). The kro-clusters chart defaults a missing `environment`
+  to `staging`.
+- Hubs are unaffected: they read only `control-plane`.
