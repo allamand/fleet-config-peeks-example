@@ -1,0 +1,11 @@
+# Tenant-wide addon enablement for the "default" tenant.
+# Mirrors appmod-blueprints gitops/overlays/tenants/workshop/enabled-addons.yaml.
+# Layer: CORE / agent-free. Read by the fleet-secrets appset at the $values slot
+# (basepath 'gitops/') for every spoke whose member file sets labels.tenant: default,
+# BEFORE overlays/environments/<env> and overlays/clusters/<cluster>, which can still
+# override these keys. Not read by hub-fleet-secret (hubs read control-plane only).
+enabledAddons:
+  # cert-manager is required by the AWS Load Balancer Controller webhook certificate
+  # and by kubevela's admission webhook (cert-manager Issuer/Certificate rendered by
+  # both charts). LBC runs on every spoke, so cert-manager must be there too.
+  cert_manager: true
