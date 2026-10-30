@@ -1,0 +1,36 @@
+# peeks-a-hub ONLY: cluster-addons appset-chart value overrides.
+# Read as the LAST valueFile of cluster-addons for this hub
+# ($overlay/overlays/clusters/<hub>/overrides.yaml). peeks-b-hub reads
+# overlays/clusters/peeks-b-hub/overrides.yaml instead, so nothing here reaches peeks-b.
+# Do NOT move this entry to overlays/environments/control-plane/overrides.yaml:
+# both hubs read that file and both already carry enable_aiops_agent=true.
+#
+# aiops-agent registry entry, same as the appmod workshop overlay
+# (workshop/overlay/overlays/environments/control-plane/overrides.yaml).
+# The gate label enable_aiops_agent is already true on the hub via
+# overlays/environments/control-plane/enabled-addons.yaml (aiops_agent: true).
+# Every per-deployment value comes from the hub cluster-secret annotations;
+# image pins stay in the chart's values.yaml.
+# path is LITERAL from the addons repo root (not gitops/-prefixed).
+aiops-agent:
+  namespace: aiops-agent
+  path: 'workshop/aiops-agent/chart'
+  annotationsAppSet:
+    argocd.argoproj.io/sync-wave: '9'
+  selector:
+    matchExpressions:
+      - key: enable_aiops_agent
+        operator: In
+        values: ['true']
+  valuesObject:
+    accountId: '{{ index .metadata.annotations "aws_account_id" }}'
+    clusterPrefix: '{{ default "peeks" (index .metadata.annotations "resource_prefix") }}'
+    region: '{{default "us-west-2" (index .metadata.annotations "aws_region")}}'
+    cloudfrontDomain: '{{ default "" (index .metadata.annotations "ingress_domain_name") }}'
+    gitlabDomain: '{{default "" (index .metadata.annotations "gitlab_domain_name")}}'
+    gitlabMrProject: '{{ trimSuffix ".git" (regexReplaceAll "^https?://[^/]+/" ((index .metadata.annotations "overlay_repo_url") | default "") "") }}'
+  ignoreDifferences:
+    - group: core.oam.dev
+      kind: Application
+      jsonPointers:
+        - /status
