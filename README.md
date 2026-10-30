@@ -42,6 +42,8 @@ gitops/
       control-plane/enabled-addons.yaml  # CORE addon set of the hubs
       dev/enabled-addons.yaml            # CORE addon set of every spoke labelled environment: dev
       prod/enabled-addons.yaml           # CORE addon set of every spoke labelled environment: prod
+    tenants/
+      default/enabled-addons.yaml        # CORE tenant-wide addons of every spoke labelled tenant: default (cert-manager)
 configs/
   multi-acct/
     values.yaml                   # ACK CARM for the hub only (spokes: see kro-clusters)
@@ -453,4 +455,10 @@ enable_<addon> labels on the spoke cluster-secret (fleet-secret chart, ESO)
   `environment` label of the cluster-secret and picks the per-addon values under
   `overlays/environments/<env>/`). The kro-clusters chart defaults a missing `environment`
   to `staging`.
+- A spoke also reads `gitops/overlays/tenants/<tenant>/enabled-addons.yaml`, keyed by
+  `labels.tenant` in its member file, **before** the environment file (environment and
+  per-cluster files can still override it). `tenants/default/` enables `cert_manager`,
+  which the AWS Load Balancer Controller and KubeVela webhooks require; it mirrors
+  appmod-blueprints `tenants/workshop/`. Without it, `aws-load-balancer-controller`,
+  `kubevela` and `ingress-class-alb` stay OutOfSync on the spokes.
 - Hubs are unaffected: they read only `control-plane`.
