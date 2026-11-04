@@ -1,0 +1,309 @@
+# ═════════════════════════════════════════════════════════════════════════════
+#  CHEMIN DANS LA BRANCHE : overlays/clusters/paris-inference-demo/addon-overrides.yaml
+#
+#  NOS INTERRUPTEURS enable_*. Lu par l'appset `hub-fleet-secret` au slot
+#  $overlay, en DERNIER de ses 5 valueFiles (gitops/bootstrap/hub-fleet-secret.yaml
+#  l.54), donc il gagne sur tout le reste.
+#
+#  POURQUOI AU NIVEAU **CLUSTER** ET PAS ENVIRONMENT — C'EST LA CORRECTION
+#  IMPORTANTE DE CETTE PASSE :
+#  ce repo de fleet-config sert DÉJÀ deux hubs vivants, peeks-a-hub et
+#  peeks-b-hub. Sébastien l'a écrit noir sur blanc dans
+#  overlays/clusters/peeks-a-hub/overrides.yaml :
+#      « Do NOT move this entry to overlays/environments/control-plane/overrides.yaml:
+#        both hubs read that file »
+#  Mes fichiers posés au niveau environment auraient donc coupé 16 addons et les
+#  9 agents SUR peeks-a-hub ET peeks-b-hub. Au niveau cluster, rien ne fuit.
+#
+#  Précédents du mécanisme dans appmod (ce n'est pas une inférence) :
+#      gitops/overlays/clusters/peeks-hub/addon-overrides.yaml
+#      gitops/overlays/clusters/terraform-platform-test/addon-overrides.yaml
+#
+#  SÉMANTIQUE À CONNAÎTRE (platform-charts/fleet-secret/templates/cluster-secret.yaml
+#  l.89-93) : seules les valeurs `true` émettent un label `enable_<addon>: 'true'`.
+#  Une valeur `false` n'émet RIEN — et c'est suffisant, le selector des
+#  ApplicationSets étant `enable_X In ['true']`. Donc `false` désactive bien,
+#  sans qu'il faille supprimer la clé.
+#  ⚠️ Réserve qui ne nous concerne pas : sur un cluster DÉJÀ existant, l'
+#  ExternalSecret est en `creationPolicy: Merge`, donc un label `enable_X: 'true'`
+#  posé par une synchro antérieure peut survivre à son passage à `false`. Notre
+#  cluster est NEUF : le secret naît avec ces valeurs, le problème ne se pose pas.
+# ═════════════════════════════════════════════════════════════════════════════
+enabledAddons:
+
+  # ─── LES DEUX AJOUTS ────────────────────────────────────────────────────
+  keda: true
+  # ⚠️ CETTE LIGNE NE SUFFIT PAS, ET IL N'Y A PLUS DE DOUTE LÀ-DESSUS.
+  # Un label sans entrée de registre ne crée AUCUNE Application. Le bloc `keda:`
+  # de overrides.yaml est donc OBLIGATOIRE, et il l'est définitivement : j'avais
+  # écrit un « cas A » où une release amont nous apporterait l'addon — il est
+  # MORT. Vérifié moi-même, pas relayé :
+  #     git grep -l -i keda origin/main                    -- gitops/  -> 0
+  #     git grep -l -i keda v0.4.0-rc7                     -- gitops/  -> 0
+  #     git grep -l -i keda origin/feature/agentic-addons   -- gitops/  -> 2
+  # et `feature/agentic-addons` a 10 commits d'avance sur main pour 1165 de
+  # retard, sans PR ouverte : elle ne sera pas fusionnée en l'état.
+  # VÉRIFIÉ AUSSI : `keda` n'est pas dans les 54 clés de la couche CORE de ce
+  # repo, et aucune n'y matche `keda|scal`. Les deux moitiés sont donc à nous —
+  # l'interrupteur ici, la définition dans overrides.yaml.
+
+  dcgm_exporter: false
+  # ÉCRIT MAIS À false — DESIGN.md §1.2 : DCGM-Exporter est PRÉ-INSTALLÉ sur les
+  # nœuds GPU Auto Mode (Bottlerocket EKS Auto Nvidia) et intégré au Node
+  # Monitoring Agent. Ne passer à true QUE si la vérification ne trouve aucun
+  # endpoint scrapable :
+  #   kubectl get svc -A -o json | jq -r '.items[]|select(.spec.ports[]?.port==9400)|.metadata.name'
+
+  # ─── LES 9 AGENTS OAP : COUPÉS ──────────────────────────────────────────
+  # La couche AGENT du repo (overlays/environments/control-plane/enabled-addons.yaml,
+  # l.18-37) les met tous à `true` — VÉRIFIÉ sur origin/main — et CE FICHIER EST
+  # L'ÉTAGE QUI LES COUPE. C'est exactement ce que Sébastien demandait : « le
+  # disable des agents peut venir de l'overlay ».
+  #
+  # ⚠️ RENVOI CROISÉ — DEUX ÉTAGES, PAS DEUX LEVIERS REDONDANTS.
+  # L'autre étage est l'ABSENCE du bloc `agenticRepo` dans config.local.yaml,
+  # qui porte la démonstration complète. Les deux ne font pas la même chose :
+  #   · `agenticRepo` est un bloc de COORDONNÉES, pas un interrupteur. Le schéma
+  #     est explicite : « setting this block only stamps the annotations — it
+  #     does NOT install the agent platform (see #1157) ». Et l'install d'OAP
+  #     passe par SA propre commande, absente d'appmod.
+  #   · CE fichier est le seul étage qui empêche réellement une Application
+  #     d'exister sous `task install`.
+  # ET LA PAIRE DOIT RESTER COHÉRENTE : omettre `agenticRepo` tout en laissant un
+  # `enable_agent_platform` atteindre ce cluster est la combinaison CASSÉE —
+  # cluster-secret.yaml l.19-28 n'émet les annotations que si agenticRepoURL est
+  # posé, et les appsets OAP les lisent sous `missingkey=error`, « where a
+  # MISSING key errors BEFORE `default` can catch it » → ParametersGenerated=False.
+  #
+  # LES 9 NE SE VALENT PAS, et c'est utile à savoir pour la relecture :
+  #   · aiops_agent + amp_incident : VRAIE entrée de registre DANS appmod
+  #     (registry/platform.yaml). Sans ce fichier elles s'installeraient. Leur
+  #     `false` est PORTEUR — et c'est lui qui nous immunise contre #1209
+  #     (aiops-agent jamais Ready sans forge).
+  #   · les 7 autres : AUCUNE entrée de registre dans appmod, leur registre vit
+  #     dans le repo d'OAP. Leur `false` est une ceinture pour le cas où l'install
+  #     d'OAP serait un jour pointée sur ce cluster — raison : le piège ci-dessus.
+  #
+  # VÉRIFIÉ : aucun addon que nous gardons ne dépend de la couche OAP (aucune
+  # réf d'agent dans leurs entrées, et zéro `dependsOn` dans les registres).
+  agent_platform: false     # 7 sans entrée dans appmod — ceinture
+  bifrost: false
+  agent_gateway: false
+  oam_components: false
+  otel_collector: false
+  langfuse: false
+  agent_core: false
+  amp_incident: false       # ⬅ entrée réelle dans appmod : `false` PORTEUR
+  aiops_agent: false        # ⬅ entrée réelle dans appmod : `false` PORTEUR (#1209)
+
+  # ─── LES COUPURES DE LA COUCHE CORE ─────────────────────────────────────
+  # Les 54 clés de la couche CORE sont reprises de l'amont ; je ne surcharge que
+  # celles qui changent. Toute clé absente ici garde la valeur de la couche CORE.
+  # ⏳ rc8 — revérifier ces noms sur le enabled-addons.yaml DE rc8 : une clé
+  # renommée en amont rendrait la surcharge silencieusement inopérante.
+
+  # GitOps : la livraison progressive n'est pas le sujet de la session
+  argo_events: false
+  argo_rollouts: false
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # 🔄 CAP CHANGÉ — CE QUE MES COUPURES RETIRAIENT À TORT
+  #
+  # Sébastien : « on a besoin du CloudFront pour Keycloak... tous les ingress
+  # du cluster ». Mes coupures supprimaient donc exactement ce dont la démo a
+  # besoin. Les clés ci-dessous REVIENNENT à `true`.
+  #
+  # ⚠️ `keycloak` A UNE DÉPENDANCE DURE SUR CROSSPLANE, vérifiée : son chart
+  # crée des ressources `iam.aws.upbound.io/v1beta1` et
+  # `eks.aws.upbound.io/v1beta1` — des Managed Resources Crossplane. Rallumer
+  # Keycloak OBLIGE donc à rallumer `crossplane`, ce qui annule l'une de mes
+  # plus grosses coupures. Ce n'est pas un choix, c'est une conséquence.
+  # ═══════════════════════════════════════════════════════════════════════
+  keycloak: true
+  # LA PORTE. C'est l'IdP qui authentifie backstage, argo-workflows, kargo,
+  # jupyterhub et kubeflow — vérifié app par app (EXPOSURE.md §1). Sans lui,
+  # ces UI tombent sur un compte local ou sur rien, derrière une distribution
+  # CloudFront publique. Il est aussi le plus long à démarrer : à prendre en
+  # compte dans le chronométrage de l'install.
+
+  crossplane: true
+  # Rallumé PAR DÉPENDANCE de keycloak, pas par choix (voir l'encadré ci-dessus).
+  # ⚠️ ORDRE : `crossplane-base` enregistre les CRD iam/eks en wave 3 ; le chart
+  # keycloak les consomme. Les sync-waves s'en chargent, mais si on applique en
+  # plusieurs commits, crossplane AVANT keycloak.
+
+  backstage: true
+  # Nommé explicitement par Sébastien, et son chemin est « CloudFront -> ALB ->
+  # pod Backstage dans EKS » : il a son PROPRE Ingress sur /backstage
+  # (ingressClassName: platform), donc il a besoin de la distribution.
+
+  argo_workflows: true
+  # Ingress + `--auth-mode=sso` CODÉ EN DUR (install.yaml l.3118), donc
+  # Keycloak obligatoire. Et son commentaire l.3108-3118 confirme que « SSO
+  # works behind CloudFront (HTTPS issuer + redirect) » — le cas est exercé.
+
+  kargo: true
+  # Ingress + OIDC Keycloak. ⚠️ PIÈGE DOCUMENTÉ par l'amont : « all four of
+  # enabled/issuerURL/clientID are required — with issuerURL alone the chart
+  # SILENTLY falls back to admin-only login (ADMIN_ACCOUNT_ENABLED) and no SSO
+  # is offered ».
+  # ✅ VÉRIFIÉ DANS rc7 (registry/gitops.yaml, bloc `kargo.api.oidc`) — les
+  # quatre sont bien posés, le piège n'est PAS armé :
+  #     enabled: true
+  #     issuerURL: https://<ingress_domain_name>/keycloak/realms/platform
+  #     clientID: kargo
+  #     cliClientID: kargo
+  # Plus `additionalScopes: [groups]` et `admins.claims.groups: [admin]`, donc
+  # l'admin Kargo est accordé aux membres du groupe Keycloak `/admin`.
+  # ⚠️ RÉSERVE HONNÊTE, non levée sans cluster : le bloc porte aussi
+  # `secret.name: kargo-admin-credentials`, donc un compte admin LOCAL existe
+  # probablement EN PARALLÈLE du SSO. Les quatre clés garantissent que le SSO
+  # est OFFERT ; elles ne prouvent pas que le compte local soit DÉSACTIVÉ.
+  # À vérifier au jour du cluster : la page de login propose-t-elle encore un
+  # formulaire utilisateur/mot de passe à côté du bouton « Log in with SSO » ?
+  # Si oui, c'est un identifiant local derrière une URL CloudFront publique, et
+  # il faut le désactiver avant de montrer quoi que ce soit.
+
+  # ✅ LES DEUX CLÉS EN SUSPENS SONT TRANCHÉES — par lecture, pas par supposition.
+  #
+  # · `kubevela` : **aucune dépendance de Backstage trouvée.** Recherche
+  #   insensible à la casse sur `kubevela|oam|vela`, `vela.io`, `oam.dev` dans
+  #   tout `gitops/addons/charts/backstage/` → **0 fichier**. Le couper ne
+  #   casserait donc pas Backstage.
+  #   MAIS JE NE LE COUPE PAS, et la raison est une leçon de cette session :
+  #   mes coupures ont déjà retiré Keycloak et les ingress, c'est-à-dire
+  #   exactement ce dont la démo avait besoin. L'asymétrie est claire — couper
+  #   un addon de plateforme à valeur CORE fait gagner du temps de synchro et
+  #   risque de retirer quelque chose que Sébastien veut montrer. Il reste donc
+  #   à sa valeur CORE (`true`), c'est-à-dire ABSENT de ce fichier.
+  #
+  # · `aws_resources` : **la clé est INERTE dans rc7.** `aws_resources`
+  #   n'apparaît dans tout `gitops/` qu'à UN seul endroit — sa propre ligne
+  #   dans `overlays/environments/control-plane/enabled-addons.yaml` l.65.
+  #   **Aucun ApplicationSet ne sélectionne sur `enable_aws_resources`**, donc
+  #   la mettre à `true` ou `false` ne change RIEN. L'abstraction qu'elle
+  #   prétend piloter (`gitops/abstractions/crossplane/aws-resources/`, des XRD
+  #   et Compositions pour S3/DynamoDB/RDS Aurora) sert le RGD `cicd-pipeline`,
+  #   dont nous n'instancions aucune claim.
+  #   Cinquième « no-op silencieux » de ce projet, et celui-ci est dans le
+  #   catalogue canonique : une clé qu'on croit configurer et que personne ne
+  #   lit. Candidat d'observation amont.
+  #   ⏳ À REVÉRIFIER si la base passe à la branche d'intégration : elle pourrait
+  #   la câbler.
+  aws_resources: false
+  # Laissée explicitement à `false` — sans effet aujourd'hui, mais c'est l'état
+  # que nous voulons si jamais un selector apparaît.
+
+  # ─── CONSÉQUENCE D'EXPOSITION DE CES COUPURES — À LIRE ──────────────────
+  # Huit charts de PEEKS rendent un objet Ingress : keycloak, backstage,
+  # argo-workflows, kargo, jupyterhub, grafana, kubeflow, et les RGD
+  # (appmod-service, cicd-pipeline, ray-service). Les cinq premiers sont à `true`
+  # dans la couche CORE et ce fichier les coupe TOUS ; grafana et kubeflow sont
+  # déjà `false` ; aucune claim de RGD n'est instanciée.
+  # Dans PEEKS, un ALB n'existe QUE s'il existe un Ingress — c'est le contrôleur
+  # ALB qui le crée à la demande. Donc : zéro Ingress → zéro ALB → rien de la
+  # plateforme n'est joignable depuis l'internet, et la voie CloudFront devient
+  # à la fois inutile ET impossible (son étape d'attache cherche l'ALB
+  # `paris-inference-demo-platform`). C'est ce qui a fait abandonner CloudFront.
+  # Inventaire complet de ce qui reste joignable et avec quelle auth : EXPOSURE.md
+  # ⏳ rc8 — si rc8 ajoute un chart qui rend un Ingress et l'active par défaut,
+  # cette conclusion est à refaire : `grep -rl "kind: Ingress" gitops/`
+
+  # Réseau : external-dns n'a plus rien à publier sans Ingress, et il porte des
+  # droits d'ÉCRITURE Route 53. Le couper est une réduction de surface gratuite.
+  # VÉRIFIÉ sans dépendance : aucun `dependsOn` dans les registres d'addons, et
+  # `enable_external_dns` ne sert qu'à sa propre entrée (core.yaml l.556) et à
+  # deux associations Pod Identity (l.90, l.210) qui se contentent de ne pas
+  # être créées. `aws_load_balancer_controller` et `ingress_class_alb` restent à
+  # leur valeur CORE (`true`) : sans Ingress ils ne créent rien, et les garder
+  # évite de casser le chemin si on rallume un jour une UI.
+  #
+  # CE QUE CETTE LIGNE RETIRE, CONCRÈTEMENT : l'association Pod Identity
+  # d'external-dns n'est jamais créée (core.yaml l.90 et l.210 la gâchent sur
+  # `enable_external_dns`), donc son rôle IAM avec droits d'ÉCRITURE Route 53
+  # n'existe pas. Ce n'est pas seulement un addon en moins dans le cluster :
+  # c'est **une permission de moins sur le compte AWS**.
+  external_dns: false
+
+  # Observabilité
+  grafana_operator: false
+  grafana_dashboards: false
+  # ⚠️ UNE COUPURE JUSTE POUR DEUX RAISONS INDÉPENDANTES — à tracer, c'est la
+  # deuxième fois que ça arrive sur ce projet (l'autre : l'ODCR en `targeted`).
+  #
+  # RAISON 1, celle d'origine : cet addon provisionne AMP *et* Managed Grafana
+  # via Crossplane (grafana.aws.upbound.io), et Managed Grafana N'EXISTE PAS en
+  # eu-west-3 (vérifié : l'endpoint ne répond pas, alors que us-west-2 répond).
+  #
+  # RAISON 2, découverte bien après, en instruisant les noms IAM de rc7 :
+  # `observability-aws` est le SEUL chart de rc7 à nommer des ressources AWS
+  # sans le nom du cluster — `<resourcePrefix>-AMGWorkspaceRole`,
+  # `<resourcePrefix>-alerting-rules`, et `amp-recording-rules.yaml` qui CODE EN
+  # DUR `accelerator-v2-recording-rules`, sans aucun préfixe. Entre deux clusters
+  # d'un même compte avec cet addon actif, la collision est GARANTIE — et le
+  # rôle Crossplane n'a aucun `deletionPolicy`, donc il est adoptable puis
+  # supprimable. Cette ligne nous en protège **sans qu'on l'ait cherché**.
+  # Vérifié désactivable proprement : enable_observability_aws n'apparaît qu'UNE
+  # fois dans tout gitops/, aucun dependsOn, et grafana-dashboards dégrade
+  # proprement (grafana_url rend vide). Le workspace AMP est créé à la main.
+  observability_aws: false
+  # ═══════════════════════════════════════════════════════════════════════
+  # `grafana` RESTE À false — ET C'EST CE QUI PERMET DE L'AVOIR QUAND MÊME.
+  #
+  # Sébastien en a besoin pour la démo. Mais l'addon `grafana` de PEEKS ne peut
+  # PAS être rendu sûr, et ce n'est pas un jugement : son chart n'a que QUATRE
+  # valeurs (`ingress_domain_name`, `aws.clusterName`, `aws.region`,
+  # `global.clusterName`) et son `install.yaml` n'en référence qu'UNE SEULE.
+  # Conséquences vérifiées ligne à ligne :
+  #   · son `grafana.ini` est FIGÉ dans le template, avec
+  #     `disable_login_form = false` et `admin_password = $__env{...}`, et
+  #     AUCUNE section `[auth.generic_oauth]` ;
+  #   · son `env:` est explicite (`secretKeyRef`), PAS d'`envFrom` — donc on ne
+  #     peut même pas injecter de `GF_AUTH_GENERIC_OAUTH_*` ;
+  #   · son Ingress est rendu SANS AUCUN garde `enabled` — il n'y a pas de
+  #     valeur pour l'empêcher d'exister.
+  # => poser des clés OIDC ou `ingress.enabled: false` dans l'overlay serait un
+  #    SIXIÈME no-op silencieux. Je ne le propose pas.
+  #
+  # LA VOIE RETENUE : on définit NOTRE PROPRE addon Grafana depuis le chart
+  # UPSTREAM, exactement comme on fait pour KEDA — voir `grafana-paris:` dans
+  # overrides.yaml. Upstream `grafana/grafana` 10.5.15 a par DÉFAUT
+  # `service.type: ClusterIP` et `ingress.enabled: false`, et expose
+  # `grafana.ini` en valeur injectable (vérifié dans son values.yaml).
+  # Résultat : Grafana tourne, Sébastien le voit, et RIEN n'est public.
+  # Détail du choix et son coût pour Sébastien : EXPOSURE.md §1.2.
+  # ═══════════════════════════════════════════════════════════════════════
+  grafana: false
+  # EXPLICITE, et pas laissé à sa valeur CORE (qui vaut déjà `false`) : une
+  # valeur dont dépend l'exposition d'une UI devant des clients ne se laisse pas
+  # reposer sur un héritage qu'un changement amont pourrait retourner sans
+  # qu'on le voie.
+  grafana_paris: true
+  # ⬅ notre addon, pas celui de PEEKS. Interrupteur de l'entrée de registre
+  #    `grafana-paris:` définie dans overrides.yaml.
+
+  # Plateforme
+  # ⚠️ ORDRE : crossplane ne se coupe qu'APRÈS observability_aws et aws_resources,
+  # ses consommateurs. L'inverse laisse leurs claims sans contrôleur et bloque le
+  # sync. Ici c'est un seul fichier appliqué d'un coup, donc l'ordre de SYNC est
+  # géré par les sync-waves, pas par l'ordre de ces lignes — mais si on applique
+  # les coupures en plusieurs commits, respecter cet ordre.
+  # `kubevela` VOLONTAIREMENT ABSENT => garde sa valeur CORE (true).
+  # Aucune dependance de Backstage trouvee (0 fichier du chart ne matche
+  # kubevela|oam|vela), donc le couper serait SANS RISQUE connu — mais
+  # apres avoir deja coupe Keycloak et les ingress par erreur, je ne coupe
+  # plus un addon de plateforme a valeur CORE pour gagner du temps de synchro.
+  devlake: false
+
+  # ML/AI — Ray compris : il est ABANDONNÉ comme véhicule (demo-prep §9), le
+  # serving passe par un Deployment vLLM nu. Ray reste dans les SLIDES comme
+  # pattern légitime (§9.3), mais n'a rien à faire sur ce cluster.
+  jupyterhub: false
+  ray_operator: false
+  spark_operator: false
+
+  # ─── CE QU'ON GARDE EXPLICITEMENT (déjà true en CORE, répété pour la relecture)
+  platform_manifests_bootstrap: true   # ⬅ CRITIQUE : c'est lui qui rend customNodepools.pools
+  external_secrets: true               # rend <hub>/config -> annotations du cluster-secret
+  kro_manifests_hub: true              # le socle kro du hub
+  image_prepuller: true                # sert l'étage « image » de la slide 11

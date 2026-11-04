@@ -1,0 +1,117 @@
+# ═════════════════════════════════════════════════════════════════════════════
+#  CHEMIN DANS LA BRANCHE : manifests/gpu-nodeclass/nodeclass.yaml
+#
+#  LA PIÈCE QUI FAIT SERVIR LES 494 $.
+#
+#  POURQUOI un manifeste brut et pas une valeur de chart : j'avais d'abord mis
+#  cette NodeClass dans une clé `customNodeClasses` du chart
+#  platform-manifests-bootstrap. **Cette clé n'existe pas.** Le chart n'a que
+#  trois templates — custom-nodepools.yaml, gpu-nodepool.yaml,
+#  trainium-nodepool.yaml — et AUCUN point d'injection de NodeClass. Rien dans
+#  tout gitops/ ne rend une ressource NodeClass : PEEKS s'appuie entièrement sur
+#  la NodeClass `default` intégrée d'Auto Mode. Helm aurait **silencieusement
+#  ignoré** ma clé inventée, les NodePools auraient référencé une NodeClass
+#  inexistante, aucun nœud GPU ne se serait lancé, et l'ODCR serait restée
+#  inconsommée sans le moindre message d'erreur.
+#
+#  Véhicule retenu : une Application ArgoCD dont les manifestes sont sourcés
+#  depuis CETTE branche d'overlay, via la surcharge `repoURLGit` par addon
+#  (défaut posé dans gitops/addons/registry/_defaults.yaml l.27, et le template
+#  de l'appset-chart l.143 utilise bien `$repoURLGit`). Voir le bloc
+#  `gpu-nodeclass-peeks:` de overlays/clusters/paris-inference-demo/overrides.yaml
+#  (c'était écrit `overlays/environments/control-plane/` — ancienne structure).
+#
+#  ✅ ET LA FORME DE CE FICHIER EST MAINTENANT CONFIRMÉE PAR LA DOC AWS, pas
+#  déduite. « Manage compute for AI/ML workloads with EKS Auto Mode and
+#  Karpenter » (docs EKS, ml-node-pools) donne EXACTEMENT ce montage : un
+#  `apiVersion: eks.amazonaws.com/v1 / kind: NodeClass` portant
+#  `capacityReservationSelectorTerms`, plus un NodePool en
+#  `["reserved", "on-demand"]`, `consolidationPolicy: WhenEmpty`,
+#  `consolidateAfter: Never`, et `topology.kubernetes.io/zone` épinglé sur l'AZ
+#  de l'ODCR. Et « Control deployment of workloads into Capacity Reservations
+#  with EKS Auto Mode » (auto-odcr) documente le champ sur la NodeClass Auto
+#  Mode. Il n'y a donc PAS besoin de sortir d'Auto Mode pour consommer l'ODCR —
+#  voir DESIGN.md §1.4, qui instruit et écarte la piste Karpenter auto-géré.
+#
+#  C'est aussi un VRAI MANQUE AMONT : sur Auto Mode, PEEKS ne sait pas exprimer
+#  de NodeClass custom, donc ne sait pas consommer d'ODCR. Candidat de PR sur
+#  aws-samples/appmod-blueprints (ajouter un template `nodeclass.yaml` au chart
+#  platform-manifests-bootstrap, sur le modèle de custom-nodepools.yaml).
+# ═════════════════════════════════════════════════════════════════════════════
+apiVersion: eks.amazonaws.com/v1
+kind: NodeClass
+metadata:
+  name: gpu-reserved-peeks
+  labels:
+    managed-by: peeks
+    purpose: aws-experience-paris-2026-11-17
+spec:
+  # ⏳ cluster — rôle de nœud Auto Mode créé par le RGD EksCluster.
+  #   aws eks describe-cluster --name paris-inference-demo --region eu-west-3 \
+  #     --query 'cluster.computeConfig.nodeRoleArn' --output text
+  # (la NodeClass attend le NOM du rôle, pas l'ARN)
+  # CE QUI CASSE : un rôle faux et aucun nœud ne rejoint le cluster.
+  role: "<NODE_ROLE_NAME>"
+
+  # ─── LE SOUS-RÉSEAU : eu-west-3b ET LUI SEUL ─────────────────────────────
+  # rg-vpc.yaml ne crée que DEUX sous-réseaux privés, AZ codées en dur :
+  # privateSubnet1 -> ${region}a (l.298), privateSubnet2 -> ${region}b (l.327).
+  # Pas de sous-réseau en AZ c. Or g6.2xlarge n'est offert en eu-west-3 que dans
+  # 3b et 3c. Donc private-subnet2 (3b) est le SEUL privé utilisable pour du GPU,
+  # et c'est l'AZ de l'ODCR.
+  # CE QUI CASSE si on sélectionne les deux : Karpenter tente des lancements en
+  # 3a où le type n'existe pas, et la réservation reste inconsommée.
+  subnetSelectorTerms:
+    - tags:
+        Name: paris-inference-demo-private-subnet2
+
+  # ⏳ cluster — si le tag ne résout pas, basculer sur l'id :
+  #   aws eks describe-cluster --name paris-inference-demo --region eu-west-3 \
+  #     --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' --output text
+  securityGroupSelectorTerms:
+    - tags:
+        kubernetes.io/cluster/paris-inference-demo: owned
+
+  # ⬇⬇ LE BLOC QUI COMPTE — chaque terme est un OU ⬇⬇
+  # L'ODCR est en `instanceMatchCriteria: targeted` : jamais consommée par
+  # hasard, il faut la désigner. Par id = sans ambiguïté ; par tag = survit à une
+  # recréation de la réservation. Les deux tags sont déjà portés par
+  # cr-0b07025fbefd104f9 (vérifié par describe-capacity-reservations).
+  #
+  # ⚠️ EFFET DE BORD À L'ÉCHELLE DU CLUSTER, documenté par AWS et à connaître
+  # avant de poser ce champ (doc EKS auto-odcr, mise en garde verbatim) :
+  #   « If you configure capacityReservationSelectorTerms on a NodeClass in a
+  #     cluster, EKS Auto Mode will no longer automatically use open ODCRs for
+  #     ANY NodeClass in the cluster. »
+  # Par défaut Auto Mode consomme automatiquement les ODCR `open` ; dès qu'une
+  # NodeClass déclare ce champ, ce comportement automatique s'éteint pour TOUTES
+  # les NodeClass du cluster.
+  # POURQUOI ça ne nous nuit pas — et c'est une DÉCISION JUSTE POUR DEUX RAISONS
+  # INDÉPENDANTES, ce qui mérite d'être tracé :
+  #   RAISON 1 (celle d'origine) : l'ODCR a été posée en `targeted` pour qu'elle
+  #     ne puisse PAS être consommée par hasard depuis les autres clusters du
+  #     compte — il y en a QUATRE de vivants (marina-argocd-test en af-south-1,
+  #     peeks-a-dev, peeks-a-hub et peeks-b-hub en us-west-2).
+  #   RAISON 2 (découverte après) : `targeted` signifie qu'elle n'était de toute
+  #     façon jamais consommée automatiquement — il FAUT la désigner. Donc
+  #     l'effet de bord ci-dessus ne nous retire STRICTEMENT RIEN.
+  # Une décision prise pour la raison 1 se trouve donc également correcte pour la
+  # raison 2. Sur un cluster partagé avec des ODCR `open`, en revanche, ce serait
+  # une régression à annoncer.
+  capacityReservationSelectorTerms:
+    - id: cr-0b07025fbefd104f9
+    - tags:
+        karpenter.sh/discovery: paris-inference-demo
+    - tags:
+        ai-on-eks: "true"
+
+  # POURQUOI 100Gi seulement : les poids viennent de S3 (pattern n°1), donc aucun
+  # cache de modèle local. 100Gi couvrent l'image vLLM (~10 Go) et /dev/shm.
+  ephemeralStorage:
+    size: 100Gi
+    iops: 3000
+    throughput: 125
+
+  snatPolicy: Random
+  networkPolicy: DefaultAllow
+  networkPolicyEventLogs: Disabled

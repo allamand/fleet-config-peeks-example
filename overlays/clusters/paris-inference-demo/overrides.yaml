@@ -1,0 +1,577 @@
+# ═════════════════════════════════════════════════════════════════════════════
+#  CHEMIN DANS LA BRANCHE : overlays/clusters/paris-inference-demo/overrides.yaml
+#
+#  Lu par l'appset `cluster-addons` au slot $overlay, EN DERNIER de ses
+#  valueFiles (gitops/bootstrap/addons.yaml l.64), donc il gagne sur tout.
+#
+#  POURQUOI AU NIVEAU **CLUSTER** — CORRECTION DE CETTE PASSE :
+#  ce repo sert DÉJÀ peeks-a-hub et peeks-b-hub. Sébastien l'écrit lui-même dans
+#  overlays/clusters/peeks-a-hub/overrides.yaml : « Do NOT move this entry to
+#  overlays/environments/control-plane/overrides.yaml: both hubs read that file ».
+#  Mes entrées posées au niveau environment auraient atterri sur les deux hubs.
+#
+#  PRÉCÉDENT QUI VALIDE TOUT CE FICHIER : commit 4606bdf du 2026-10-30,
+#  « feat(peeks-a-hub): add aiops-agent registry entry in the cluster overrides ».
+#  Message de Sébastien : « no registry entry introduces the aiops-agent
+#  ApplicationSet. Add the entry in overlays/clusters/peeks-a-hub/overrides.yaml,
+#  the last valueFile of this hub's cluster-addons, so only this hub gets it. »
+#  => Ajouter une ENTRÉE DE REGISTRE depuis l'overlay est un mécanisme ÉPROUVÉ
+#     dans ce repo, pas une acrobatie. C'est ce qui rend le cas B de KEDA sûr.
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LA NODECLASS — servie depuis CETTE branche d'overlay
+#
+# POURQUOI cet addon existe : le chart platform-manifests-bootstrap n'a AUCUN
+# point d'injection de NodeClass (3 templates, aucun ne rend de NodeClass), et
+# rien dans gitops/ n'en rend. Il faut donc un autre véhicule.
+#
+# Véhicule : `repoURLGit` est surchargeable PAR ADDON — son défaut
+# (`{{.metadata.annotations.addonsRepoURL}}`) est posé dans
+# gitops/addons/registry/_defaults.yaml l.27, et le template de l'appset-chart
+# l.143 utilise bien `$repoURLGit` pour la source de l'Application. En le
+# surchargeant vers le repo de fleet-config, l'Application sert les manifestes
+# bruts de cette branche.
+#
+# ⚠️ NON VÉRIFIABLE SANS CLUSTER — c'est le principal risque résiduel de cette
+# pièce : je n'ai pas pu confirmer que l'appset-chart gère un `path` pointant un
+# répertoire de manifestes BRUTS (ArgoCD le fait nativement, mais le chart
+# ajoute peut-être toujours un bloc `helm:`).
+# REPLI si ça ne rend pas : appliquer la NodeClass une fois à la main
+#   kubectl apply -f manifests/gpu-nodeclass/nodeclass.yaml
+# Aucun contrôleur ne la possède, donc rien ne la revertira. Hors GitOps, mais
+# c'est UN objet, idempotent, et ça ne bloque pas la démo.
+#
+# ⏳ rc8 — si rc8 a ajouté un template NodeClass au chart, supprimer cet addon
+# et repasser par une valeur de chart : ce serait plus propre.
+# ─────────────────────────────────────────────────────────────────────────────
+gpu-nodeclass-peeks:
+  namespace: kube-system
+  # Surcharge de la source vers CETTE branche d'overlay.
+  repoURLGit: https://github.com/allamand/fleet-config-peeks-example
+  repoURLGitRevision: demo/paris-2026-11-17
+  repoURLGitBasePath: ""
+  path: manifests/gpu-nodeclass
+  annotationsAppSet:
+    # Wave -2 : la NodeClass doit EXISTER avant que les NodePools la référencent
+    # (custom-nodepools est rendu par platform-manifests-bootstrap, wave par
+    # défaut 0). Un NodePool qui référence une NodeClass absente reste
+    # NotReady et ne provisionne rien.
+    argocd.argoproj.io/sync-wave: "-2"
+  selector:
+    matchExpressions:
+      - key: enable_platform_manifests_bootstrap
+        operator: In
+        values: ["true"]
+        # Réutilise l'interrupteur du chart qui porte les NodePools : la
+        # NodeClass et les pools vont toujours ensemble, donc un seul
+        # interrupteur évite un état incohérent.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KEDA — UNE SEULE VOIE : L'OVERLAY DÉFINIT L'ADDON. (le « cas A » est mort)
+#
+# J'avais écrit deux cas, dont un « cas A » où une seule ligne `keda: true`
+# suffirait si une release amont avait mergé origin/feature/agentic-addons.
+# CE CAS N'EXISTE PAS, et c'est tranché, pas supposé :
+#   · KEDA est ABSENT de `main` ET de `v0.4.0-rc7` — vérifié moi-même :
+#       git grep -l -i keda origin/main  -- gitops/  -> 0 fichier
+#       git grep -l -i keda v0.4.0-rc7   -- gitops/  -> 0 fichier
+#       git grep -l -i keda origin/feature/agentic-addons -- gitops/ -> 2
+#   · et `feature/agentic-addons` a 10 commits d'avance sur main pour **1165 de
+#     retard**, sans PR ouverte : elle ne sera pas fusionnée en l'état.
+# => Aucune release ne nous apportera KEDA. L'overlay DOIT le définir, et c'est
+#    sûr parce qu'il passe EN DERNIER (addons.yaml l.63-64), donc il peut
+#    DÉFINIR un addon et pas seulement le basculer — précédent `4606bdf`.
+#
+# ET LA BRANCHE EST UNE RÉFÉRENCE À LIRE, PAS UNE SOURCE À RECOPIER : avec 1165
+# commits de retard, son `values.yaml` est périmé. J'y ai pris les seules choses
+# stables — chartName, chartRepository, namespace, wave, nom du selector — et
+# j'ai VALIDÉ le reste contre le VRAI chart téléchargé
+# (kedacore.github.io/charts, keda-2.19.0.tgz, values.yaml lu). C'est ce qui a
+# fait apparaître l'erreur de forme corrigée ci-dessous sur `serviceAccount`.
+# ─────────────────────────────────────────────────────────────────────────────
+keda:
+  namespace: keda                                      # = art antérieur
+  chartName: keda                                      # = art antérieur
+  releaseName: keda                                    # = art antérieur
+  chartRepository: https://kedacore.github.io/charts    # = art antérieur
+  defaultVersion: "2.19.0"
+  # POURQUOI 2.19.0 et pas 2.21.0 : les deux sont publiées (index du dépôt lu le
+  # 2026-11-04 : 2.21.0, 2.20.2, 2.20.1, 2.20.0, 2.19.0, 2.18.x…), et s'aligner
+  # sur la version qu'un auteur PEEKS avait déjà retenue vaut mieux que prendre
+  # la plus récente du jour. SURTOUT : c'est la version dont j'ai réellement lu
+  # le `values.yaml`, donc la seule contre laquelle les valeurs ci-dessous sont
+  # vérifiées. CE QUI CASSE si on monte : revalider la forme de `serviceAccount`
+  # et `resources` sur la nouvelle version avant de changer ce champ.
+  annotationsAppSet:
+    argocd.argoproj.io/sync-wave: "3"
+    # POURQUOI wave 3 : c'est celle que .kiro/skills/manage-addons/references/
+    # sync-waves.md RÉSERVE explicitement à keda, aux côtés de
+    # kube-state-metrics, prometheus-node-exporter et opentelemetry-operator.
+  selector:
+    matchExpressions:
+      - key: enable_keda
+        operator: In
+        values: ["true"]
+  valuesObject:
+    nodeSelector:
+      node-type: general-purpose
+      # POURQUOI : les trois pools d'inférence sont taintés nvidia.com/gpu, et
+      # l'opérateur KEDA n'a rien à faire sur un nœud GPU. `general-purpose` est
+      # le label que porte le pool general-purpose-peeks de PEEKS.
+      # CE QUI CASSE : sans ça, l'opérateur peut rester Pending si le pool
+      # général intégré a été retiré (enableGeneralPurposeNodePool="false").
+    # ⚠️ CORRECTION DE FORME — MÊME CLASSE DE BOGUE QUE `customNodeClasses`.
+    # J'avais écrit `serviceAccount: { create: true, name: keda-operator }`.
+    # **CETTE FORME N'EXISTE PAS DANS LE CHART.** Lecture du vrai values.yaml de
+    # keda-2.19.0 : `serviceAccount` est nesté PAR COMPOSANT —
+    #     serviceAccount:
+    #       operator:      { create: true, name: keda-operator,        ... }
+    #       metricServer:  { create: true, name: keda-metrics-server,  ... }
+    #       webhooks:      { create: true, name: keda-webhook,         ... }
+    # Mes deux clés auraient été ajoutées à côté et IGNORÉES en silence.
+    # Par chance le défaut du chart est DÉJÀ `keda-operator`, donc l'association
+    # Pod Identity aurait fonctionné — par accident, pas par conception.
+    #
+    # ✅ ET ÇA FERME L'INCONNUE DE DESIGN.md §4.4 SANS CLUSTER : le nom du SA de
+    # l'opérateur est `keda-operator`, lu dans le chart. L'association Pod
+    # Identity (DESIGN.md §4.3) référence le bon nom. Le `kubectl -n keda get sa`
+    # reste un contrôle de confirmation, plus une inconnue bloquante.
+    serviceAccount:
+      operator:
+        create: true
+        name: keda-operator
+
+    # `podIdentity.aws.irsa` DOIT RESTER À false (son défaut) : nous utilisons
+    # **EKS Pod Identity**, pas IRSA (DESIGN.md §4.1), et Pod Identity ne demande
+    # AUCUNE configuration côté chart — l'association est posée côté AWS.
+    # Explicite pour empêcher qu'on « aide » en activant IRSA, ce qui ferait
+    # monter un token projeté inutile et masquerait la vraie identité.
+    podIdentity:
+      aws:
+        irsa:
+          enabled: false
+    resources:
+      operator:
+        requests: { cpu: 100m, memory: 256Mi }
+        limits:   { memory: 512Mi }
+      metricServer:
+        requests: { cpu: 100m, memory: 256Mi }
+        limits:   { memory: 512Mi }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GRAFANA — NOTRE PROPRE ADDON, DEPUIS LE CHART UPSTREAM
+#
+# POURQUOI pas l'addon `grafana` de PEEKS : son chart n'a que QUATRE valeurs et
+# n'en référence qu'UNE. Son `grafana.ini` est figé (`disable_login_form =
+# false`, pas de `[auth.generic_oauth]`), son `env:` est explicite donc pas
+# d'`envFrom`, et son Ingress est rendu SANS garde `enabled`. Il est donc
+# impossible, PAR VALEURS, de lui mettre de l'OIDC ou de lui retirer son
+# ingress. Toute clé qu'on y poserait serait un no-op silencieux.
+#
+# CE QUE CE BLOC DONNE : Grafana tourne, Sébastien le voit, et RIEN n'est
+# public. Mêmes mécanique et véhicule que KEDA — une entrée de registre que
+# l'overlay apporte, l'overlay passant en dernier.
+#
+# TOUTES LES CLÉS CI-DESSOUS SONT VÉRIFIÉES dans le values.yaml du chart
+# upstream grafana/grafana 10.5.15 (téléchargé et lu) : `service`, `ingress`,
+# `grafana.ini`, `datasources`, `serviceAccount`, `admin`, `persistence`,
+# `nodeSelector`, `tolerations`, `resources`.
+# ─────────────────────────────────────────────────────────────────────────────
+grafana-paris:
+  namespace: grafana-paris
+  chartName: grafana
+  releaseName: grafana-paris
+  chartRepository: https://grafana.github.io/helm-charts
+  defaultVersion: "10.5.15"
+  # Dernière version publiée au 2026-11-04, et la seule dont j'ai lu le
+  # values.yaml — donc la seule contre laquelle ces clés sont vérifiées.
+  annotationsAppSet:
+    argocd.argoproj.io/sync-wave: "3"
+  selector:
+    matchExpressions:
+      - key: enable_grafana_paris
+        operator: In
+        values: ["true"]
+  valuesObject:
+    # ═══ LA RAISON D'ÊTRE DE CE BLOC : AUCUNE EXPOSITION ═══
+    ingress:
+      enabled: false
+      # Déjà le défaut du chart, posé EXPLICITEMENT : un défaut d'exposition ne
+      # se laisse pas implicite dans un fichier qu'on relit avant de montrer
+      # quelque chose à des clients. Pas d'Ingress -> pas de chemin sur l'ALB ->
+      # pas d'URL CloudFront -> rien de public.
+    service:
+      type: ClusterIP
+      port: 80
+      # Idem : défaut du chart, rendu explicite.
+    # Accès : `kubectl -n grafana-paris port-forward svc/grafana-paris 3000:80`
+    # donc à travers l'endpoint EKS, authentifié en IAM.
+
+    persistence:
+      enabled: false
+      # Démo éphémère : rien à conserver, et ça évite un EBS de plus à balayer
+      # au teardown.
+
+    admin:
+      existingSecret: ""
+      # Vide = le chart génère lui-même un mot de passe admin ALÉATOIRE dans un
+      # Secret. On ne fixe AUCUN mot de passe dans ce fichier — un identifiant
+      # en clair dans un livrable est exclu. Le récupérer le jour J :
+      #   kubectl -n grafana-paris get secret grafana-paris \
+      #     -o jsonpath='{.data.admin-password}' | base64 -d
+      # ⚠️ Ce compte local est acceptable ICI et SEULEMENT ici parce que le
+      # service n'est pas exposé : la porte d'entrée réelle est l'endpoint EKS
+      # (IAM + access entry). Le même compte derrière une URL CloudFront
+      # publique serait inacceptable — c'est précisément pourquoi l'addon
+      # `grafana` de PEEKS reste à `false`.
+
+    grafana.ini:
+      users:
+        allow_sign_up: false
+      auth.anonymous:
+        enabled: false
+        # EXPLICITE : l'accès anonyme est refusé. C'est la clé que la
+        # vérification de sortie (EXPOSURE.md §1.2) doit prouver.
+
+    # ⏳ cluster — la source de données AMP, en SigV4.
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: AMP
+            type: prometheus
+            access: proxy
+            url: "https://aps-workspaces.eu-west-3.amazonaws.com/workspaces/<WS_ID>"
+            isDefault: true
+            jsonData:
+              httpMethod: POST
+              sigV4Auth: true
+              sigV4AuthType: default
+              sigV4Region: eu-west-3
+    serviceAccount:
+      create: true
+      name: grafana-paris
+      # ⏳ cluster — une association Pod Identity sur CE ServiceAccount, avec la
+      # MÊME politique en lecture que KEDA (DESIGN.md §4.3), scopée au seul
+      # workspace :
+      #   aws eks create-pod-identity-association --region eu-west-3 \
+      #     --cluster-name paris-inference-demo \
+      #     --namespace grafana-paris --service-account grafana-paris \
+      #     --role-arn arn:aws:iam::382076407153:role/paris-demo-grafana-amp-reader
+      # Sans elle, la source de données répond 403 et aucun panneau ne s'affiche.
+
+    nodeSelector:
+      node-type: general-purpose
+      # Pas sur un nœud GPU : les trois pools d'inférence sont taintés, et
+      # Grafana n'a rien à y faire.
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { memory: 512Mi }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DCGM EXPORTER — ÉCRIT MAIS SUSPENDU
+#
+# ⚠️ NE PAS activer avant la vérification de DESIGN.md §1.2 : DCGM-Exporter est
+# PRÉ-INSTALLÉ sur les nœuds GPU Auto Mode (Bottlerocket EKS Auto Nvidia) et
+# intégré au Node Monitoring Agent. Reste à savoir s'il expose un /metrics
+# scrapable — « intégré à NMA » n'implique pas « endpoint Prometheus ».
+#
+#   kubectl get ds -A | grep -i -E 'dcgm|nvidia'
+#   kubectl get svc -A -o json | jq -r '.items[]|select(.spec.ports[]?.port==9400)|.metadata.name'
+#
+# Si un endpoint existe : SUPPRIMER ce bloc, laisser dcgm_exporter: false, et
+# pointer la config de scrape AMP sur l'endpoint existant.
+# Si aucun : garder ce bloc et passer dcgm_exporter: true.
+#
+# Transposé de l'Application ArgoCD d'ai-on-eks
+# (infra/base/terraform/argocd-addons/nvidia-dcgm-exporter.yaml).
+# ─────────────────────────────────────────────────────────────────────────────
+dcgm-exporter:
+  namespace: monitoring
+  chartName: dcgm-exporter
+  releaseName: dcgm-exporter
+  chartRepository: https://nvidia.github.io/dcgm-exporter/helm-charts
+  defaultVersion: "4.8.1"
+  # POURQUOI 4.8.1 et pas 4.8.4 : c'est la version qu'ai-on-eks épingle
+  # (infra/base/terraform/variables.tf l.518-522), donc déjà exercée sur du GPU AWS.
+  annotationsAppSet:
+    argocd.argoproj.io/sync-wave: "3"
+  selector:
+    matchExpressions:
+      - key: enable_dcgm_exporter
+        operator: In
+        values: ["true"]
+  valuesObject:
+    # OBLIGATOIRE : nos trois pools GPU sont taintés, et la doc EKS est explicite —
+    # « EKS Auto Mode manages its own device plugins and tolerates its NodePool
+    # taints without configuration. For any component you install yourself, add
+    # the toleration ». CE QUI CASSE sans : le DaemonSet ne se place sur aucun
+    # nœud GPU, et le nœud paraît sain alors qu'il ne publie rien.
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    # PAS de nodeSelector : j'avais mis `inference-tier: floor`, c'était une
+    # erreur — ça aurait exclu le nœud de burst et le nœud shardé. Un DaemonSet
+    # avec la tolérance se place partout où il y a des GPU.
+    # ═══════════════════════════════════════════════════════════════════════
+    # ⚠️ DÉFAUT CORRIGÉ — J'AVAIS `securityContext.privileged: true` ET
+    # `hostPID: true`. LES DEUX SONT SUPPRIMÉS, ET C'EST MIEUX À TOUS POINTS.
+    #
+    # Trouvé en téléchargeant le vrai chart (dcgm-exporter-4.8.1.tgz) et en
+    # validant clé par clé. Trois faits :
+    #
+    # 1. CE N'ÉTAIT PAS UNE CLÉ IGNORÉE, C'ÉTAIT PIRE : un pod INVALIDE.
+    #    Le défaut du chart est
+    #      securityContext: {runAsNonRoot: false, runAsUser: 0,
+    #                        capabilities: {add: [SYS_ADMIN], drop: [ALL]},
+    #                        allowPrivilegeEscalation: FALSE}
+    #    et le template fait `toYaml .Values.securityContext` — donc le merge
+    #    Helm aurait laissé `privileged: true` ET `allowPrivilegeEscalation:
+    #    false` dans le MÊME securityContext. Kubernetes REFUSE cette
+    #    combinaison (« cannot set allowPrivilegeEscalation to false and
+    #    privileged to true ») : le DaemonSet n'aurait jamais démarré un pod.
+    #
+    # 2. C'ÉTAIT INUTILE. Le chart n'a BESOIN ni de `privileged` ni d'un
+    #    montage `/dev` : il ne monte que /var/lib/kubelet/pod-resources (plus
+    #    TLS et web-config), et NVIDIA lui donne `SYS_ADMIN` + `runAsUser: 0`.
+    #    C'est la posture que NVIDIA livre pour exactement ce travail.
+    #
+    # 3. MON MODÈLE ÉTAIT LE MAUVAIS. Je m'étais calqué sur la démonstration
+    #    d'AWS (§DESIGN 1.1), qui lance un pod ÉCRIT À LA MAIN exécutant
+    #    `dcgmi` — pas ce chart. Ce que cette démonstration prouve reste vrai
+    #    (securityContext et hostPath FONCTIONNENT sur Auto Mode), mais elle ne
+    #    dicte pas la configuration de ce chart.
+    #
+    # `hostPID` existe bien dans le chart (défaut `false`), mais NVIDIA ne le
+    # demande pas : on garde le défaut. Moins de privilèges, et ça démarre.
+    # => On ne surcharge NI securityContext NI hostPID. Le chart a raison.
+    # ═══════════════════════════════════════════════════════════════════════
+    serviceMonitor:
+      enabled: false
+      # POURQUOI false : PEEKS n'a PAS le Prometheus Operator, donc pas de CRD
+      # ServiceMonitor. L'ingestion passe par le collecteur managé AMP.
+    service:
+      type: ClusterIP
+      # Explicite, même si c'est le défaut du chart : un défaut d'exposition ne
+      # se laisse pas implicite dans un fichier qu'on relit. Le collecteur AMP
+      # scrape depuis l'intérieur du VPC, aucun accès externe n'est nécessaire.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9400"
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { memory: 256Mi }
+
+
+platform-manifests-bootstrap:
+  valuesObject:
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # ⚠️ LA NODECLASS N'EST PAS ICI — ET C'EST UNE CORRECTION
+    #
+    # J'avais d'abord posé la NodeClass dans une clé `customNodeClasses` de ce
+    # chart. **Cette clé n'existe pas.** Le chart n'a que trois templates
+    # (custom-nodepools.yaml, gpu-nodepool.yaml, trainium-nodepool.yaml) et
+    # AUCUN point d'injection de NodeClass ; rien dans tout gitops/ ne rend une
+    # ressource NodeClass, PEEKS s'appuyant sur la `default` d'Auto Mode.
+    # Helm aurait silencieusement ignoré la clé, les NodePools auraient
+    # référencé une NodeClass inexistante, aucun nœud GPU ne se serait lancé,
+    # et les 494 $ seraient restés inconsommés SANS message d'erreur.
+    #
+    # La NodeClass vit donc dans ../../../manifests/gpu-nodeclass/nodeclass.yaml
+    # de cette branche, servie par l'addon `gpu-nodeclass-peeks` défini EN HAUT
+    # DE CE MÊME FICHIER (niveau cluster — c'était écrit `overlays/environments/
+    # control-plane/overrides.yaml`, chemin de l'ancienne structure, corrigé).
+    # ═══════════════════════════════════════════════════════════════════════
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # LES TROIS NODEPOOLS — PATTERN n°3
+    #
+    # `customNodepools.pools` est le point d'extension de PREMIER RANG de PEEKS.
+    # Son propre en-tête (custom-nodepools.yaml) : « the CONSUMER's list. ALWAYS
+    # rendered, on every cluster, regardless of the gate ». Chaque entrée est
+    # { name, spec: <karpenter.sh/v1 NodePool spec> }.
+    #
+    # Forme calquée sur les pools *-peeks existants
+    # (workshop/overlay/configs/platform-manifests-bootstrap/values.yaml) :
+    # clés de requirements du namespace Auto Mode, labels node-type +
+    # managed-by, terminationGracePeriod long, et l'idiome de budget #892.
+    #
+    # Rendu VÉRIFIÉ : helm template du vrai chart PEEKS sort bien les trois
+    # NodePools avec les bons weight/limits/disruption.
+    # ═══════════════════════════════════════════════════════════════════════
+    customNodepools:
+      pools:
+
+        # ─── LE PLANCHER CHAUD ────────────────────────────────────────────
+        # ⚠️ PAS de `spec.replicas` : la capacité statique dépend du feature gate
+        # `staticCapacity`, et sur Auto Mode le contrôleur Karpenter est géré par
+        # AWS — NON VÉRIFIABLE sans cluster. Le plancher tient autrement, et de
+        # façon équivalente à l'écran :
+        #   WhenEmpty + consolidateAfter Never -> jamais consolidé
+        #   expireAfter Never                  -> jamais recyclé par expiry
+        #   budget planifié nodes "0"          -> aucune disruption 23h/24
+        #   limits.nodes 1                     -> jamais plus d'un nœud
+        #   + KEDA minReplicaCount 1           -> le nœud n'est jamais vide
+        - name: inference-floor-peeks
+          spec:
+            weight: 100
+            limits:
+              nodes: 1
+              # POURQUOI ce garde-fou : sans lui, le weight 100 ferait
+              # provisionner les répliques suivantes ICI, en on-demand
+              # ordinaire, alors que l'ODCR ne couvre QU'UNE instance. C'est
+              # `limits.nodes: 1` qui force le débordement vers le burst.
+            disruption:
+              consolidationPolicy: WhenEmpty
+              consolidateAfter: Never
+              budgets:
+                # IDIOME MAISON, issue #892 : un `nodes: "0"` NON planifié serait
+                # toujours actif et MASQUERAIT toute fenêtre. On exprime donc
+                # « coupé par défaut » par un `nodes: "0"` PLANIFIÉ couvrant
+                # 23 h, en laissant volontairement le trou 02:00-03:00 UTC où le
+                # défaut Karpenter (nodes: 10%) s'applique.
+                # CE QUI CASSE si on met un budget non planifié : la fenêtre de
+                # maintenance devient inatteignable, et un nœud drifté ne peut
+                # plus jamais être remplacé.
+                - nodes: "0"
+                  schedule: "0 3 * * *"
+                  duration: 23h
+            template:
+              metadata:
+                labels:
+                  node-type: inference-floor
+                  inference-tier: floor
+                  managed-by: peeks
+              spec:
+                nodeClassRef:
+                  group: eks.amazonaws.com
+                  kind: NodeClass
+                  name: gpu-reserved-peeks     # ⬅ la NodeClass ci-dessus
+                requirements:
+                  - key: "karpenter.sh/capacity-type"
+                    operator: In
+                    values: ["reserved", "on-demand"]
+                    # `reserved` EN PREMIER : Karpenter épuise la capacité
+                    # réservée avant de retomber sur l'on-demand ordinaire.
+                    # JAMAIS de spot sur un plancher interactif.
+                  - key: "kubernetes.io/arch"
+                    operator: In
+                    values: ["amd64"]
+                  - key: "node.kubernetes.io/instance-type"
+                    operator: In
+                    values: ["g6.2xlarge"]
+                    # g6.2xlarge = 1x L4 (22 888 MiB), 8 vCPU, 32 GiB RAM.
+                    # Mistral-7B : 14,5 Go BF16 -> ~6,7 GiB de KV cache à
+                    # maxModelLen 16384. Confortable.
+                  - key: "topology.kubernetes.io/zone"
+                    operator: In
+                    values: ["eu-west-3b"]
+                    # Redondant avec le sous-réseau unique de la NodeClass, mais
+                    # explicite : l'ODCR est en 3b et n'est pas déplaçable.
+                taints:
+                  - key: nvidia.com/gpu
+                    effect: NoSchedule
+                expireAfter: Never
+                terminationGracePeriod: 48h    # = valeur maison des pools *-peeks
+
+        # ─── LA TIER DE BURST — élastique, et PAS réservée ────────────────
+        # C'est la moitié droite de la slide 15 : plancher sur capacité engagée,
+        # burst sur capacité flexible. Réserver ce pool contredirait le propos
+        # tenu à l'oral, et quelqu'un dans la salle le relèverait.
+        - name: inference-burst-peeks
+          spec:
+            weight: 10
+            limits:
+              nodes: 3
+            disruption:
+              consolidationPolicy: WhenEmpty
+              # WhenEmpty, PAS WhenEmptyOrUnderutilized : un serveur vLLM paraît
+              # toujours « sous-utilisé » entre deux rafales, et le faire
+              # remplacer relance un cold start complet. C'est le réglage
+              # contre-intuitif de la session, et c'est l'inverse du NodePool gpu
+              # livré par PEEKS.
+              consolidateAfter: 10m            # aligné sur la fenêtre KEDA de 600 s
+              budgets:
+                - nodes: "1"
+            template:
+              metadata:
+                labels:
+                  node-type: inference-burst
+                  inference-tier: burst
+                  managed-by: peeks
+              spec:
+                nodeClassRef:
+                  group: eks.amazonaws.com
+                  kind: NodeClass
+                  name: gpu-reserved-peeks
+                  # Le burst n'a pas besoin du sélecteur d'ODCR, mais il doit
+                  # rester en 3b (g6 absent de 3a, et PEEKS n'a pas de 3c) :
+                  # réutiliser la même NodeClass est le plus simple et le plus sûr.
+                requirements:
+                  - key: "karpenter.sh/capacity-type"
+                    operator: In
+                    values: ["on-demand", "spot"]
+                  - key: "kubernetes.io/arch"
+                    operator: In
+                    values: ["amd64"]
+                  - key: "node.kubernetes.io/instance-type"
+                    operator: In
+                    values: ["g6.2xlarge"]
+                  - key: "topology.kubernetes.io/zone"
+                    operator: In
+                    values: ["eu-west-3b"]
+                taints:
+                  - key: nvidia.com/gpu
+                    effect: NoSchedule
+                expireAfter: 720h
+                terminationGracePeriod: 1h     # court : rien de précieux dessus
+
+        # ─── LE BEAT SHARDING (optionnel) ─────────────────────────────────
+        # Mistral-Small-24B en TP4 sur 4x L4. À n'activer que si le beat bonus
+        # est conservé (demo-prep §13). limits.nodes: 1 = garde-fou de coût :
+        # g6.12xlarge = 48 vCPU, 5,8412 $/h.
+        - name: inference-sharded-peeks
+          spec:
+            weight: 5
+            limits:
+              nodes: 1
+            disruption:
+              consolidationPolicy: WhenEmpty
+              consolidateAfter: 5m
+              budgets:
+                - nodes: "1"
+            template:
+              metadata:
+                labels:
+                  node-type: inference-sharded
+                  inference-tier: sharded
+                  managed-by: peeks
+              spec:
+                nodeClassRef:
+                  group: eks.amazonaws.com
+                  kind: NodeClass
+                  name: gpu-reserved-peeks
+                requirements:
+                  - key: "karpenter.sh/capacity-type"
+                    operator: In
+                    values: ["on-demand"]
+                    # Pas de spot : la démo ne doit pas se faire évincer en scène.
+                  - key: "kubernetes.io/arch"
+                    operator: In
+                    values: ["amd64"]
+                  - key: "node.kubernetes.io/instance-type"
+                    operator: In
+                    values: ["g6.12xlarge"]
+                    # 4x L4 = 91 552 MiB (89,4 GiB). Mistral-Small-24B : 48 Go
+                    # BF16 en TP4 -> ~11,2 GiB/GPU, et ~35 GiB de KV cache.
+                  - key: "topology.kubernetes.io/zone"
+                    operator: In
+                    values: ["eu-west-3b"]
+                taints:
+                  - key: nvidia.com/gpu
+                    effect: NoSchedule
+                expireAfter: 720h
+                terminationGracePeriod: 1h
