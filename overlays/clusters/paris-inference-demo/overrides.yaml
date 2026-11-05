@@ -497,9 +497,47 @@ dcgm-exporter:
       - key: nvidia.com/gpu
         operator: Exists
         effect: NoSchedule
-    # PAS de nodeSelector : j'avais mis `inference-tier: floor`, c'était une
-    # erreur — ça aurait exclu le nœud de burst et le nœud shardé. Un DaemonSet
-    # avec la tolérance se place partout où il y a des GPU.
+    # ═══════════════════════════════════════════════════════════════════════
+    # 🩹 RESTRICTION AUX NŒUDS GPU — AJOUTÉE le 2026-11-05, APRÈS MESURE
+    #
+    # CE COMMENTAIRE REMPLACE UNE AFFIRMATION FAUSSE. Il disait :
+    #   « PAS de nodeSelector : j'avais mis `inference-tier: floor`, c'était une
+    #     erreur — ça aurait exclu le nœud de burst et le nœud shardé. Un
+    #     DaemonSet avec la tolérance se place partout où il y a des GPU. »
+    # La première moitié est juste : un `nodeSelector` ne fait que de l'égalité,
+    # donc `inference-tier: floor` aurait bien exclu burst et sharded.
+    # LA SECONDE EST FAUSSE, et la mesure l'a prouvé. Une toleration **autorise**
+    # la planification sur un nœud taint é ; elle ne la **restreint pas**. Un
+    # DaemonSet toléré se place PARTOUT, pas « partout où il y a des GPU ».
+    #
+    # CE QUE LA MESURE A DONNÉ, juste après l'activation du label :
+    #   monitoring/dcgm-exporter   desired=3 current=3 ready=0
+    #   3 pods en CrashLoopBackOff sur c5a.large, c7i-flex.large,
+    #   c7i-flex.xlarge — tous nvidia.com/gpu=0
+    #   logs : "Starting dcgm-exporter" puis exit status 1
+    #
+    # LA BONNE FORME est donc une `affinity`, pas un `nodeSelector` : elle
+    # accepte `Exists`, ce qui couvre les trois tiers d'un coup là où l'égalité
+    # d'un nodeSelector obligeait à en choisir un. Label relevé sur
+    # `inference-floor-peeks` :
+    #   {"inference-tier":"floor","managed-by":"peeks","node-type":"inference-floor"}
+    #
+    # POURQUOI PAS `managed-by: peeks` : `general-purpose-peeks` le porte aussi
+    # et c'est un pool CPU — on reproduirait exactement le crash.
+    # POURQUOI PAS un label de famille d'instance : le NodePool `gpu` intégré
+    # d'Auto Mode ne pose aucun label propre, il n'existe donc pas de label GPU
+    # universel sur ce cluster.
+    #
+    # CONSÉQUENCE ASSUMÉE : le DaemonSet ne couvre QUE les trois pools
+    # d'inférence. Un GPU ajouté hors de ces pools ne serait pas scrapé — à
+    # revoir si la flotte GPU s'élargit au-delà de la démo.
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: inference-tier
+                  operator: Exists
     # ═══════════════════════════════════════════════════════════════════════
     # ⚠️ DÉFAUT CORRIGÉ — J'AVAIS `securityContext.privileged: true` ET
     # `hostPID: true`. LES DEUX SONT SUPPRIMÉS, ET C'EST MIEUX À TOUS POINTS.

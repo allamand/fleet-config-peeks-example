@@ -344,7 +344,20 @@ enabledAddons:
   # soit SYS_ADMIN sans `privileged`, ce qui est cohérent. Rendu complet : 6
   # objets (ConfigMap, DaemonSet, Role, RoleBinding, Service, ServiceAccount).
   #
-  # ATTENDU APRÈS ACTIVATION : le DaemonSet existe avec **0 pod**. Il tolère
-  # `nvidia.com/gpu:NoSchedule` et aucun nœud GPU ne tourne avant le 10/11 — un
-  # DaemonSet à 0 pod est donc le bon état, pas une panne.
+  # ⚠️ CE QUE J'AI D'ABORD CRU ATTENDU, ET QUI ÉTAIT FAUX. J'avais écrit ici que
+  # le DaemonSet aurait « 0 pod » parce qu'aucun nœud GPU ne tourne. Mesuré
+  # après activation : 3 pods, tous en `CrashLoopBackOff`.
+  #   monitoring/dcgm-exporter   desired=3 current=3 ready=0
+  #   pods sur c5a.large, c7i-flex.large, c7i-flex.xlarge — tous nvidia.com/gpu=0
+  #   logs : "Starting dcgm-exporter" puis `exit status 1`
+  # La cause est une confusion que je dois nommer : une **toleration AUTORISE**
+  # la planification sur un nœud taint é, elle ne la **RESTREINT PAS** aux nœuds
+  # GPU. Le chart ne pose ni `nodeSelector` ni `affinity` par défaut
+  # (`nodeSelector: {}`, `affinity: {}`), donc le DaemonSet atterrit sur TOUS les
+  # nœuds, et l'exporter meurt là où il n'y a pas de carte.
+  # La restriction est posée dans `overrides.yaml`, entrée `dcgm-exporter`.
+  #
+  # ÉTAT ATTENDU, cette fois mesuré et non supposé : DaemonSet présent,
+  # `desiredNumberScheduled=0`, aucun pod — jusqu'à ce qu'un nœud d'inférence
+  # existe, soit le 10/11.
   dcgm_exporter: true
