@@ -1,0 +1,33 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# grafana-paris — NEUTRALISE LA CLÉ `dashboards` HÉRITÉE DU CHART INTERNE
+#
+# LE DÉFAUT : l'Application `grafana-paris-paris-inference-demo` ne se rendait
+# PAS. `helm template` échouait, donc sync=Unknown et aucun pod :
+#
+#   Error: grafana/templates/deployment.yaml:36:28
+#     executing "grafana.configData" at <$dashboards>:
+#       range can't iterate over true
+#
+# LA CAUSE : `gitops/addons/configs/grafana/values.yaml:48-50` (dans appmod)
+# pose `dashboards: {enabled: true}`. C'est la convention du chart INTERNE
+# `gitops/addons/charts/grafana`. Mais `grafana-paris` consomme le chart
+# UPSTREAM `grafana/grafana` 10.5.15, où `dashboards` est un MAP de dashboards à
+# provisionner, que `_config.tpl:86` parcourt avec `range`. Le `range` tombe
+# alors sur la valeur booléenne `true` et le rendu casse.
+#
+# POURQUOI CE FICHIER ET PAS configs/grafana/values.yaml DE CET OVERLAY :
+# ce dépôt est PARTAGÉ avec peeks-a-hub et peeks-b-hub, et `configs/*` est lu
+# par TOUS les clusters qui le consomment. Ce tier-ci
+# (overlays/clusters/paris-inference-demo/<addon>/values.yaml) est le dernier
+# valueFile de la chaîne ET il ne concerne que notre hub. Vérifié sur les
+# valueFiles réellement rendus de l'Application :
+#   $defaults/gitops/addons/configs/grafana/values.yaml          <- pose le defaut
+#   ...
+#   $overlay/overlays/clusters/paris-inference-demo/grafana/values.yaml  <- CE FICHIER, en dernier
+#
+# POURQUOI `null` ET PAS `{}` : Helm fusionne les tables en profondeur. Un
+# `dashboards: {}` ne remplacerait rien et `{enabled: true}` survivrait. Seul un
+# `null` explicite SUPPRIME la clé héritée. Vérifié par `helm template` local
+# avant le push, pas déduit de la documentation.
+# ─────────────────────────────────────────────────────────────────────────────
+dashboards: null

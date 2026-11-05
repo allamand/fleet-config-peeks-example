@@ -1,0 +1,44 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# observability-aws — AMG COUPÉ, AMP ET LE SCRAPER CONSERVÉS
+#
+# LE DÉFAUT : l'Application restait OutOfSync/Progressing avec une opération
+# `Running` jamais terminée depuis le 2026-11-04T22:40:37Z, sur le message
+# `waiting for healthy state of kro.run/GrafanaWorkspaceWithVpc/demo-paris-b-amg`.
+# Quatre ressources attendaient derrière : les 2 RuleGroupNamespace, le Scraper
+# AMP et la WorkspaceSAMLConfiguration.
+#
+# LA CAUSE N'EST PAS UN RÉGLAGE — Amazon Managed Grafana N'EXISTE PAS à Paris.
+# La CR Crossplane le dit sans ambiguïté :
+#   Post "https://grafana.eu-west-3.amazonaws.com/workspaces":
+#     dial tcp: lookup grafana.eu-west-3.amazonaws.com ... no such host
+# Confirmé par la source AWS : Amazon Managed Grafana est `isNotExpandingIn`
+# en eu-west-3, et `isAvailableIn` en eu-west-1 et eu-central-1. DNS vérifié
+# dans les deux sens : l'endpoint résout en euw1/euc1/use1/usw2 mais pas en
+# euw3, alors que `eks`, `aps` et `ec2` y résolvent. Ce n'est donc pas
+# temporaire et aucune valeur ne le contournera.
+#
+# CE QUE CETTE CLÉ COUPE, ET CE QU'ELLE PRÉSERVE — les gardes du chart sont
+# indépendantes, c'est ce qui rend la coupe chirurgicale :
+#   amg.enabled      -> amg-workspace.yaml, amg-saml.yaml, amg-iam-role.yaml   COUPÉS
+#   amp.enabled      -> amp-workspace.yaml, amp-*-rules.yaml                   INTACTS
+#   scraper.enabled  -> prometheus-scraper.yaml                                INTACT
+# Le Scraper AMP est le collecteur de métriques dont KEDA a besoin : il ne doit
+# surtout pas tomber avec AMG.
+#
+# AUCUNE SUPPRESSION AWS N'EST DÉCLENCHÉE, vérifié avant d'écrire cette ligne :
+#   - la CR workspace a `atProvider` à ZÉRO champ (id, arn, endpoint tous nuls)
+#     -> aucune ressource AWS n'a jamais été créée
+#   - `aws grafana list-workspaces` : 0 en eu-west-1, 0 en eu-central-1,
+#     endpoint injoignable en eu-west-3
+#   - l'Application est en `prune: false` et l'AppSet en
+#     `preserveResourcesOnDeletion: true` -> ce qui sort du rendu n'est pas supprimé
+# La CR porte bien `deletionPolicy: Delete`, mais sans ressource derrière il n'y
+# a rien à supprimer, et `prune: false` ne la supprimera pas.
+#
+# RÉSIDU ASSUMÉ : la CR `GrafanaWorkspaceWithVpc/demo-paris-b-amg` reste en
+# place, orpheline et inerte (`kro.run/owned`, finalizer `kro.run/finalizer`),
+# parce que `prune: false` ne la retire pas. Elle ne consomme rien et n'attend
+# plus personne. La retirer serait un geste live séparé, à décider à froid.
+# ─────────────────────────────────────────────────────────────────────────────
+amg:
+  enabled: false
