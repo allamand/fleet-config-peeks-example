@@ -196,6 +196,79 @@ keda:
         requests: { cpu: 100m, memory: 256Mi }
         limits:   { memory: 512Mi }
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🔧 CORRECTIF CRD — `ServerSideApply=true`, AJOUTÉ le 2026-11-05
+  #
+  # LE DÉFAUT : la CRD `scaledjobs.keda.sh` n'est JAMAIS créée. 5 CRD sur 6
+  # seulement, et `keda-operator` reste en CrashLoopBackOff sur un type non
+  # reconnu.
+  #
+  # MESURÉ sur l'Application `keda-paris-inference-demo` le 2026-11-05 à 18:08Z
+  # — et ceci CORRIGE une note antérieure qui disait « le sync échoue en bloc » :
+  #   ressources en echec : 1 / 29
+  #   phase=Running  "Retrying attempt #54"  sync=OutOfSync  health=Progressing
+  #   CustomResourceDefinition "scaledjobs.keda.sh" is invalid:
+  #     metadata.annotations: Too long: may not be more than 262144 bytes
+  # 28 ressources sur 29 sont donc bien appliquées ; SEULE la CRD échoue, et
+  # l'Application retente indéfiniment (`retry.limit: -1`). L'Application n'est
+  # pas bloquée en entier — c'est l'opérateur qui est inutilisable, faute du
+  # type `ScaledJob` :
+  #   "no matches for kind \"ScaledJob\" in version \"keda.sh/v1alpha1\""
+  #   keda-operator-798fc9b664-vbpqj  0/1  CrashLoopBackOff  75 redemarrages
+  #
+  # LA CAUSE, mesurée : le défaut du chart (appset-chart/values.yaml:18-19) ne
+  # porte que `CreateNamespace=true`. L'apply est donc côté CLIENT, et écrit
+  # l'annotation `kubectl.kubernetes.io/last-applied-configuration`, plafonnée
+  # à 262 144 octets. `ServerSideApply` n'écrit pas cette annotation — c'est le
+  # seul levier, pas un réglage de confort.
+  # Défaut amont connu : kedacore/keda#4740.
+  #
+  # LA PREUVE CAUSALE, mesurée le 2026-11-05 sur le chart keda 2.19.0 réellement
+  # téléchargé : des 6 CRD, UNE SEULE dépasse la limite, et c'est exactement
+  # celle qui manque.
+  #     662 483  crd-scaledjobs.yaml                      <<< > 262 144
+  #      23 158  crd-clustertriggerauthentications.yaml
+  #      23 021  crd-triggerauthentications.yaml
+  #      22 154  crd-scaledobjects.yaml
+  #       7 555  crd-cloudeventsources.yaml
+  #       7 487  crd-clustercloudeventsources.yaml
+  # Les 5 autres sont 11 à 35 fois sous la limite — d'où « 5 CRD sur 6 ».
+  #
+  # ⚠️ CETTE CLÉ REMPLACE LE `syncPolicy` PAR DÉFAUT EN ENTIER, ELLE NE LE
+  # FUSIONNE PAS. Vérifié dans le template : appset-chart/templates/
+  # application-set.yaml:202-208 est un `if $chartConfig.syncPolicy / else`,
+  # donc tout ce qui n'est pas réécrit ici serait PERDU. `automated` et `retry`
+  # sont donc redonnés À L'IDENTIQUE du défaut lu dans values.yaml:4-19 —
+  # ne pas les « simplifier », ce serait une régression silencieuse.
+  #
+  # UN SEUL LEVIER À LA FOIS : ne rien pousser d'autre dans le même commit,
+  # sinon on ne saura pas lequel a installé la CRD.
+  #
+  # SI ÇA NE SUFFIT PAS : `Replace=true` au lieu de `ServerSideApply=true`.
+  # Même effet sur l'annotation, mais remplacement non fusionnant — plus
+  # brutal, à ne tenter qu'en second.
+  #
+  # RETOUR ARRIÈRE : révoquer le commit ; `selfHeal: true` ramène l'Application
+  # à l'état d'avant. La CRD déjà posée SURVIT (`prune: false`), ce qui est sans
+  # danger — une CRD sans CR ne fait rien — et se retire au besoin par
+  # `kubectl delete crd scaledjobs.keda.sh` APRÈS avoir vérifié qu'aucun
+  # ScaledJob n'existe.
+  # ═══════════════════════════════════════════════════════════════════════════
+  syncPolicy:
+    automated:                 # ↓ identique à appset-chart/values.yaml:5-11
+      selfHeal: true
+      allowEmpty: true
+      prune: false
+    retry:                     # ↓ identique à appset-chart/values.yaml:12-17
+      limit: -1
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 10m
+    syncOptions:
+      - CreateNamespace=true   # ← le défaut, conservé
+      - ServerSideApply=true   # ← LE SEUL AJOUT RÉEL de ce bloc
+
 # ─────────────────────────────────────────────────────────────────────────────
 # GRAFANA — NOTRE PROPRE ADDON, DEPUIS LE CHART UPSTREAM
 #
