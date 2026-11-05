@@ -725,7 +725,26 @@ platform-manifests-bootstrap:
                 taints:
                   - key: nvidia.com/gpu
                     effect: NoSchedule
-                expireAfter: Never
+                # CORRIGÉ le 2026-11-05 : `expireAfter: Never` était REJETÉ par le
+                # CRD. Trois règles CEL de nodepools.karpenter.sh s'appliquent dès
+                # que `nodeClassRef.group == 'eks.amazonaws.com'`, ce qui est notre
+                # cas (NodeClass gpu-reserved-peeks) :
+                #   R1  expireAfter + terminationGracePeriod <= 504h
+                #   R2  expireAfter <= 480h   (si terminationGracePeriod absent)
+                #   R3  expireAfter != 'Never'        <- CELLE QUI NOUS BLOQUAIT
+                # Le pattern du schéma accepte `Never` (^(([0-9]+(s|m|h))+|Never)$),
+                # mais R3 l'interdit pour ce groupe. Et le message d'erreur était
+                # trompeur -- « type conversion error from 'string' to Duration » --
+                # parce que `duration('Never')` échoue dans R1 AVANT que R3 ne
+                # s'exprime. Ce n'est donc pas un bug de format, c'est une
+                # interdiction explicite.
+                #
+                # POURQUOI 456h : c'est le maximum admis ici (456 + 48 = 504h, R1
+                # est un `<=`), donc la plus longue vie possible pour ce pool. Il
+                # restait 290h jusqu'au 18/11 au moment du correctif : 456h laisse
+                # 166h de marge APRÈS la démo. Un nœud créé maintenant n'expire pas
+                # avant le 24/11.
+                expireAfter: 456h
                 terminationGracePeriod: 48h    # = valeur maison des pools *-peeks
 
         # ─── LA TIER DE BURST — élastique, et PAS réservée ────────────────
@@ -777,7 +796,11 @@ platform-manifests-bootstrap:
                 taints:
                   - key: nvidia.com/gpu
                     effect: NoSchedule
-                expireAfter: 720h
+                # CORRIGÉ le 2026-11-05 : 720h + 1h = 721h dépassait les 504h de la
+                # règle R1 du CRD (cf. le commentaire du pool floor ci-dessus).
+                # 480h + 1h = 481h, sous la limite, et 480h reste la valeur ronde
+                # que R2 admet seule. 20 jours, largement au-delà du 17/11.
+                expireAfter: 480h
                 terminationGracePeriod: 1h     # court : rien de précieux dessus
 
         # ─── LE BEAT SHARDING (optionnel) ─────────────────────────────────
@@ -824,5 +847,7 @@ platform-manifests-bootstrap:
                 taints:
                   - key: nvidia.com/gpu
                     effect: NoSchedule
-                expireAfter: 720h
+                # CORRIGÉ le 2026-11-05 : même défaut que le pool de burst,
+                # 720h + 1h = 721h > 504h. Même valeur de remplacement.
+                expireAfter: 480h
                 terminationGracePeriod: 1h
