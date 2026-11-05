@@ -33,6 +33,7 @@ clusters:
     clusterName: peeks-a-dev
     tenant: default
     environment: dev
+    deletionPolicy: retain
     provider: kro-ack
     fleetMember: spoke
     region: us-west-2
@@ -50,6 +51,7 @@ clusters:
     clusterName: peeks-b-dev
     tenant: default
     environment: dev
+    deletionPolicy: retain
     provider: kro-ack
     fleetMember: spoke
     region: us-west-2
