@@ -446,6 +446,95 @@ platform-manifests-bootstrap:
     customNodepools:
       pools:
 
+        # ─── LE POOL GÉNÉRALISTE — COPIE VERBATIM DU WORKSHOP ─────────────
+        # Repris MOT POUR MOT de
+        #   workshop/overlay/configs/platform-manifests-bootstrap/values.yaml
+        # et NON réinventé : nous avons déjà payé une fois pour avoir improvisé
+        # une convention (les `nodeSelector` posés sans le pool qui les porte).
+        #
+        # POURQUOI IL FAUT CE POOL ALORS QUE `platform-general` EXISTE DÉJÀ.
+        # Le levier A a fait apparaître `platform-general`, le pool de repli
+        # GÉNÉRIQUE du chart. Il porte bien `node-type: general-purpose` — c'est
+        # lui qui a débloqué KEDA ce matin — mais son budget est
+        # `[{nodes: "10%"}]` SANS `schedule`, et un budget non programmé est
+        # toujours actif : il ne bloque JAMAIS rien. Il ne protège donc pas
+        # Grafana d'une relocalisation en pleine démo.
+        # Ce pool-ci porte `[{nodes: "0", schedule: "0 3 * * *", duration: 23h}]`
+        # — la consolidation est bloquée 23 h sur 24, autorisée seulement entre
+        # 02:00 et 03:00 UTC. C'est CE budget qui rend l'annotation
+        # `karpenter.sh/do-not-disrupt` inutile.
+        #
+        # ET IL DOIT RESTER NON TAINTÉ. C'est la condition que le chart pose
+        # lui-même : les ~28 pods d'addons amont qui migreront au levier B
+        # n'ont AUCUN `nodeSelector`. Un pool labellé mais tainté satisferait
+        # KEDA tout en laissant les autres inplanifiables — le pire des deux
+        # mondes, et invisible jusqu'à ce que le pool intégré soit détruit.
+        # `taints: null` ci-dessous, et c'est volontaire.
+        #
+        # `weight: 100` contre 10 pour `platform-general` : à l'égalité de
+        # satisfaction, Karpenter préfère le poids le plus élevé, donc les pods
+        # migreront ICI et non sur le repli génerique.
+        #
+        # PAS d'`expireAfter`, comme dans le workshop : le défaut du CRD est
+        # `336h`, et 336h + 48h de terminationGracePeriod = 384h, sous le
+        # plafond de 21 jours (504h). Vérifié en dry-run serveur :
+        #   nodepool.karpenter.sh/general-purpose-peeks created (server dry run)
+        - name: general-purpose-peeks
+          spec:
+            weight: 100
+            disruption:
+              consolidationPolicy: WhenEmptyOrUnderutilized
+              consolidateAfter: 5m
+              budgets:
+                - nodes: "0"
+                  schedule: "0 3 * * *"
+                  duration: 23h
+            template:
+              metadata:
+                labels:
+                  node-type: general-purpose
+                  managed-by: peeks
+              spec:
+                nodeClassRef:
+                  group: eks.amazonaws.com
+                  kind: NodeClass
+                  name: default
+                requirements:
+                  - key: karpenter.sh/capacity-type
+                    operator: In
+                    values: ["on-demand"]
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values: ["amd64"]
+                  - key: eks.amazonaws.com/instance-category
+                    operator: In
+                    values: ["c", "m", "r"]
+                  - key: eks.amazonaws.com/instance-generation
+                    operator: Gt
+                    values: ["5"]
+                  - key: eks.amazonaws.com/instance-size
+                    operator: In
+                    values: ["xlarge", "2xlarge", "4xlarge", "8xlarge"]
+                terminationGracePeriod: 48h
+
+        # ⛔ PAS DE `system-peeks`, ET C'EST UN CHOIX DOCUMENTÉ.
+        # Le workshop en déclare un, nous PAS, pour trois raisons mesurées :
+        #   1. Le levier B ne retire QUE `general-purpose` du computeConfig.
+        #      `rg-eks.yaml:432` garde toujours `["system"]`, et le commentaire
+        #      amont dit pourquoi : « keeping at least one built-in is what
+        #      makes EKS provision the "default" NodeClass + EC2 access entry
+        #      that the custom *-peeks pools reference ». Retirer `system`
+        #      casserait la NodeClass `default` que TOUS nos pools référencent.
+        #   2. Le design amont REPOSE sur le built-in `system` tainté : « "system"
+        #      is tainted CriticalAddonsOnly, so unpinned EventBus/CI pods still
+        #      fall through to general-purpose-peeks ». Le mécanisme fonctionne
+        #      déjà sans nous.
+        #   3. `system-peeks` est tainté `CriticalAddonsOnly` ET en `weight: 100`.
+        #      L'ajouter ferait préférer ce nouveau pool au built-in pour tout
+        #      pod tolérant, donc provisionnerait un nœud et déplacerait à terme
+        #      ESO, ArgoCD et Keycloak. Du brassage gratuit sur exactement les
+        #      nœuds qu'on ne veut pas toucher.
+
         # ─── LE PLANCHER CHAUD ────────────────────────────────────────────
         # ⚠️ PAS de `spec.replicas` : la capacité statique dépend du feature gate
         # `staticCapacity`, et sur Auto Mode le contrôleur Karpenter est géré par
