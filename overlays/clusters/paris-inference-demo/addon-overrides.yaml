@@ -307,3 +307,44 @@ enabledAddons:
   external_secrets: true               # rend <hub>/config -> annotations du cluster-secret
   kro_manifests_hub: true              # le socle kro du hub
   image_prepuller: true                # sert l'étage « image » de la slide 11
+
+  # ─── OBSERVABILITÉ GPU — ACTIVÉ le 2026-11-05 ──────────────────────────────
+  # `dcgm-exporter` est l'exportateur de métriques GPU de NVIDIA. L'addon était
+  # DÉJÀ déclaré dans `overrides.yaml` (chart NVIDIA 4.8.1, selector
+  # `enable_dcgm_exporter In true`), mais le label n'existait pas sur le secret
+  # de cluster : l'ApplicationSet ne sélectionnait donc jamais notre hub, aucune
+  # Application n'était générée, et le dashboard GPU de la démo aurait été vide
+  # de façon STRUCTURELLE — pas « en attente du premier nœud GPU ».
+  #
+  # POURQUOI CETTE CLÉ ICI, ET PAS UNE ANNOTATION NI UN SEED. La voie GitOps
+  # existe et c'est celle-ci, vérifiée bout en bout :
+  #   l'Application `fleet-secret-paris-inference-demo` rend
+  #   `platform-charts/fleet-secret` et lit EN DERNIER
+  #     $overlay/overlays/clusters/paris-inference-demo/addon-overrides.yaml
+  #   le chart boucle sur `enabledAddons` et pose le label
+  #     external-secret.yaml:77-81   enable_{{ $addon }}: 'true'
+  #     cluster-secret.yaml:91       idem
+  #   puis ESO propage vers le secret de cluster (creationPolicy: Merge).
+  # Donc AUCUN `hub:seed`, aucune écriture dans Secrets Manager, aucune
+  # annotation posée à la main.
+  #
+  # ⚠️ LE NOM DE LA CLÉ PREND DES UNDERSCORES. Le mapping est `enable_<clé>`,
+  # donc `dcgm_exporter` donne `enable_dcgm_exporter`, qui est exactement ce que
+  # le selector attend. Écrire `dcgm-exporter` avec un tiret — le nom de l'addon
+  # et du chart — produirait `enable_dcgm-exporter` et ne sélectionnerait rien,
+  # silencieusement.
+  #
+  # VALIDÉ CONTRE LE CHART 4.8.1 réellement épinglé, avant d'activer. Le piège
+  # connu est un `privileged: true` fusionné avec `allowPrivilegeEscalation:
+  # false`, combinaison que le kubelet refuse. Il n'est PAS présent : le rendu
+  # donne
+  #   securityContext: {allowPrivilegeEscalation: false,
+  #                     capabilities: {add: [SYS_ADMIN], drop: [ALL]},
+  #                     runAsNonRoot: false, runAsUser: 0}
+  # soit SYS_ADMIN sans `privileged`, ce qui est cohérent. Rendu complet : 6
+  # objets (ConfigMap, DaemonSet, Role, RoleBinding, Service, ServiceAccount).
+  #
+  # ATTENDU APRÈS ACTIVATION : le DaemonSet existe avec **0 pod**. Il tolère
+  # `nvidia.com/gpu:NoSchedule` et aucun nœud GPU ne tourne avant le 10/11 — un
+  # DaemonSet à 0 pod est donc le bon état, pas une panne.
+  dcgm_exporter: true
