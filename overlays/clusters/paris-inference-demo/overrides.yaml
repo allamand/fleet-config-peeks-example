@@ -344,7 +344,31 @@ grafana-paris:
         # EXPLICITE : l'accès anonyme est refusé. C'est la clé que la
         # vérification de sortie (EXPOSURE.md §1.2) doit prouver.
 
-    # ⏳ cluster — la source de données AMP, en SigV4.
+    # La source de données AMP, en SigV4.
+    #
+    # ⬛ `<WS_ID>` SUBSTITUÉ le 2026-11-05. Le placeholder n'avait jamais été
+    # remplacé, donc l'URL de la datasource était littéralement invalide : même
+    # avec une authentification en place, aucune requête n'aurait abouti. Le
+    # `# ⏳ cluster` qui marquait cette ligne attendait un relevé sur le cluster,
+    # et le voici.
+    #
+    # Relevé par `aws amp list-workspaces --region eu-west-3` :
+    #   ws-294f5b5c-de0f-497b-ab57-d13f3fb2736d
+    #   alias  demo-paris-b-observability-amp
+    #   état   ACTIVE
+    #   arn    arn:aws:aps:eu-west-3:<compte>:workspace/ws-294f5b5c-…
+    # Confirmé côté cluster par la CR `workspace.amp.aws.upbound.io/demo-paris-b-amg`,
+    # dont le champ d'id porte la même valeur, `True True` depuis 23 h.
+    #
+    # ⚠️ L'AUTHENTIFICATION MANQUE ENCORE, et ce n'est pas réparable ici.
+    # `sigV4AuthType: default` demande à Grafana la chaîne de credentials du SDK
+    # AWS. Le pod n'en a aucune : pas de pod identity pour ce namespace (0 sur
+    # les 16 du cluster), pas d'annotation `eks.amazonaws.com/role-arn` sur le
+    # ServiceAccount, aucun volume `aws-iam-token`, aucune variable `AWS_*`. Il
+    # faut un rôle IAM et une pod identity association — deux écritures AWS, en
+    # attente de décision. Jusque-là la datasource est correctement DÉCLARÉE mais
+    # répondra `403`/`no credentials`, et non `404` comme avec le placeholder :
+    # la distinction compte pour diagnostiquer le 10/11.
     datasources:
       datasources.yaml:
         apiVersion: 1
@@ -352,7 +376,7 @@ grafana-paris:
           - name: AMP
             type: prometheus
             access: proxy
-            url: "https://aps-workspaces.eu-west-3.amazonaws.com/workspaces/<WS_ID>"
+            url: "https://aps-workspaces.eu-west-3.amazonaws.com/workspaces/ws-294f5b5c-de0f-497b-ab57-d13f3fb2736d"
             isDefault: true
             jsonData:
               httpMethod: POST
