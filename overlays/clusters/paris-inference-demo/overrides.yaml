@@ -196,6 +196,46 @@ keda:
         requests: { cpu: 100m, memory: 256Mi }
         limits:   { memory: 512Mi }
 
+    # ═════════════════════════════════════════════════════════════════════════
+    # 📊 MÉTRIQUES PROMETHEUS DE L'OPÉRATEUR — ACTIVÉES le 2026-11-05
+    #
+    # LE DÉFAUT : l'opérateur tournait avec `--enable-prometheus-metrics=false`,
+    # donc AUCUNE métrique `keda_*` n'existait. Mesuré : l'endpoint
+    # `keda-operator-metrics-apiserver:8080` rend 257 Ko, mais ce sont 792 lignes
+    # `apiserver_*`, 422 `go_*` et 310 `workqueue_*` — c'est le serveur
+    # d'API agrégé, pas l'opérateur. Zéro série `keda_*`. Un dashboard KEDA
+    # aurait donc été vide de façon STRUCTURELLE, et pas « en attente du 10/11 ».
+    #
+    # LA CLÉ, vérifiée dans le chart RÉELLEMENT épinglé (keda 2.19.0 téléchargé,
+    # Chart.yaml version=2.19.0 appVersion=2.19.0), templates ET values :
+    #   templates/manager/deployment.yaml:98
+    #     - "--enable-prometheus-metrics={{ .Values.prometheus.operator.enabled }}"
+    #   templates/manager/deployment.yaml:99-100
+    #     {{- if .Values.prometheus.operator.enabled }}
+    #     - "--metrics-bind-address=:{{ .Values.prometheus.operator.port }}"
+    #   values.yaml : prometheus.operator.enabled = False, port = 8080
+    #
+    # ⚠️ LE PORT N'EST PAS 9666. Avant ce correctif le conteneur ne déclarait que
+    # `('metricsservice', 9666)`, qui est le canal gRPC vers le metrics-apiserver
+    # — rien à voir avec Prometheus. Les métriques `keda_*` sortent sur le port
+    # de `prometheus.operator.port`, soit 8080, posé par `--metrics-bind-address`.
+    #
+    # Et le rendu local a corrigé une hypothèse que j'avais écrite ici : la clé
+    # ne pose pas seulement le flag, elle fait AUSSI déclarer le port. Le
+    # `helm template` du chart épinglé donne
+    #   ports : [('metrics', 8080), ('metricsservice', 9666)]
+    # là où le défaut ne donnait que le second. Le port est donc nommé et
+    # scrapable, ce qui est mieux qu'un port implicite joignable seulement par
+    # l'IP du pod.
+    #
+    # serviceMonitor laissé à false : il n'y a pas de prometheus-operator ici,
+    # et le collecteur AMP managé ne lit pas les ServiceMonitor (cf. AUDIT §4.2).
+    # Le scrape viendra du Scraper AMP, configuré ailleurs.
+    prometheus:
+      operator:
+        enabled: true
+        port: 8080
+
   # ═══════════════════════════════════════════════════════════════════════════
   # 🔧 CORRECTIF CRD — `ServerSideApply=true`, AJOUTÉ le 2026-11-05
   #
