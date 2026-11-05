@@ -1,0 +1,9 @@
+# peeks-a-hub ONLY: fleet-secret enabledAddons overrides.
+# Read as the LAST valueFile of fleet-secret-peeks-a-hub
+# ($overlay/overlays/clusters/<hub>/addon-overrides.yaml), so nothing here reaches peeks-b.
+# Helm deep-merges enabledAddons with the environment files; each true key becomes
+# the cluster-secret label enable_<key>: 'true' (platform-charts/fleet-secret).
+enabledAddons:
+  # OAP prometheus-operator-crds addon (CRDs only, namespace monitoring).
+  # Lets the langfuse / agent-evaluation PrometheusRules render (OAP #143 guard).
+  monitoring: true
