@@ -114,8 +114,45 @@ keda:
         operator: In
         values: ["true"]
   valuesObject:
+    # ═══════════════════════════════════════════════════════════════════════
+    # 🎯 ÉPINGLAGE — `managed-by: peeks` AJOUTÉ le 2026-11-05.
+    #    C'est le 3e pied du trépied, et l'INVERSE EXACT de ce qu'on avait fait
+    #    cette nuit : on retirait le sélecteur, il fallait le rendre PLUS
+    #    SPÉCIFIQUE.
+    #
+    # POURQUOI `node-type` SEUL NE SUFFIT PAS. Deux pools non taintés le portent
+    # désormais, et un seul protège :
+    #   platform-general      budget [{nodes: "10%"}] SANS schedule -> jamais bloquant
+    #   general-purpose-peeks budget [{nodes:"0", schedule:"0 3 * * *", 23h}] -> 23h bloquées
+    # Seul `general-purpose-peeks` porte AUSSI `managed-by: peeks`. La paire de
+    # labels le désigne donc sans ambiguïté.
+    #
+    # ET LE `weight: 100` NE SUFFIT PAS NON PLUS — c'est la mesure qui a tranché.
+    # Le poids de Karpenter n'arbitre QU'AU PROVISIONNEMENT. Un pod qui redémarre
+    # produit un événement de PLANIFICATION, que kube-scheduler résout sur la
+    # capacité EXISTANTE, sans jamais consulter le poids. Relevé à 09:40Z : les
+    # 3 pods KEDA étaient sur `platform-general`, donc SANS fenêtre, et ils y
+    # seraient restés. Le poids décide où l'on CRÉE un nœud, pas où l'on place
+    # un pod.
+    #
+    # LE WEBHOOK VIENT EN PASSANT, et ce n'est pas un choix. Le chart KEDA n'a
+    # qu'un `nodeSelector` PLAT (`.Values.nodeSelector`, utilisé 3 fois dans
+    # deployment.yaml) : il n'existe aucune variante par composant, contrairement
+    # à `podAnnotations` qui l'est. Les 3 pods sont donc épinglés ensemble.
+    # `keda-admission-webhooks` n'a aucun besoin de la fenêtre — il ne valide que
+    # les écritures de ScaledObject, et rien n'écrit pendant la démo — mais
+    # l'embarquer coûte 100m/100Mi sur un nœud qui a 2620m de libre, et un
+    # redémarrage de 20 s. Moins cher que de forker le chart.
+    #
+    # COÛT TOTAL : zéro nœud. Les 3 pods KEDA plus Grafana totalisent ~200m CPU
+    # et ~512Mi, et le nœud `general-purpose-peeks` (c7i-flex.xlarge) a 3770m
+    # allouables dont 1150m utilisés. Il existait déjà et était quasi vide — la
+    # fenêtre interdisant de le reprendre, il coûtait 61 $ jusqu'au 18 à ne rien
+    # faire. L'épinglage ne l'ajoute pas, il le rend utile.
+    # ═══════════════════════════════════════════════════════════════════════
     nodeSelector:
       node-type: general-purpose
+      managed-by: peeks
       # POURQUOI : les trois pools d'inférence sont taintés nvidia.com/gpu, et
       # l'opérateur KEDA n'a rien à faire sur un nœud GPU. `general-purpose` est
       # le label que porte le pool general-purpose-peeks de PEEKS.
@@ -261,8 +298,19 @@ grafana-paris:
       #     --role-arn arn:aws:iam::382076407153:role/paris-demo-grafana-amp-reader
       # Sans elle, la source de données répond 403 et aucun panneau ne s'affiche.
 
+    # 🎯 ÉPINGLAGE — `managed-by: peeks` ajouté le 2026-11-05, même raison que
+    # pour `keda` (voir le bloc détaillé plus haut dans ce fichier). Ici l'enjeu
+    # est le plus visible de la démo : Grafana est en `replicas: 1` avec
+    # `deploymentStrategy: RollingUpdate`, donc une éviction fait DISPARAÎTRE le
+    # tableau de bord de l'écran, devant 45 clients, à l'instant où l'on montre
+    # la montée en charge. `node-type` seul le laisserait atterrir sur
+    # `platform-general`, qui n'a aucune fenêtre de protection.
+    # ⏳ Sans effet immédiat : l'Application `grafana-paris` ne rend toujours pas
+    # son chart (bug amont sur `dashboards`, cf. AUDIT §5), donc aucun pod à
+    # replacer aujourd'hui. L'épinglage sera actif dès qu'elle rendra.
     nodeSelector:
       node-type: general-purpose
+      managed-by: peeks
       # Pas sur un nœud GPU : les trois pools d'inférence sont taintés, et
       # Grafana n'a rien à y faire.
     resources:
