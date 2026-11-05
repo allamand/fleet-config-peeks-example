@@ -383,6 +383,35 @@ grafana-paris:
         enabled: false
         # EXPLICITE : l'accès anonyme est refusé. C'est la clé que la
         # vérification de sortie (EXPOSURE.md §1.2) doit prouver.
+      # ═══════════════════════════════════════════════════════════════════════
+      # 🔑 SIGV4 DOIT ÊTRE ACTIVÉ GLOBALEMENT — AJOUTÉ le 2026-11-05
+      #
+      # LE DÉFAUT : la datasource portait bien `sigV4Auth: true`, le rôle IAM et
+      # la pod identity association étaient en place, le token était injecté
+      # (`eks-pod-identity-token`, `AWS_CONTAINER_CREDENTIALS_FULL_URI`) — et la
+      # requête rendait quand même :
+      #   HTTP 403  {"message":"Missing Authentication Token"}
+      # C'est la réponse d'AWS à une requête NON SIGNÉE : Grafana n'appliquait
+      # pas SigV4 du tout.
+      #
+      # LA CAUSE : `jsonData.sigV4Auth` d'une datasource est IGNORÉ tant que
+      # SigV4 n'est pas activé au niveau du serveur. Lu directement dans le
+      # `defaults.ini` du conteneur (Grafana 12.3.1), et non dans une
+      # documentation :
+      #   [auth]  sigv4_auth_enabled = false
+      #           # Set to true to enable SigV4 authentication option for
+      #           # HTTP-based datasources
+      #   [auth]  sigv4_verbose_logging = false
+      # Le `grafana.ini` en vigueur ne portait AUCUNE mention de sigv4, et la
+      # section `[auth]` n'existait même pas — seulement `[auth.anonymous]`,
+      # qui est une section distincte malgré le préfixe commun.
+      #
+      # Noter la forme : `auth:` et `auth.anonymous:` sont deux clés YAML
+      # SŒURS, qui produisent deux sections ini différentes. Imbriquer
+      # `anonymous` sous `auth` donnerait `[auth] anonymous.enabled`, ce qui ne
+      # désactiverait plus l'accès anonyme — donc on ne regroupe pas.
+      auth:
+        sigv4_auth_enabled: true
 
     # La source de données AMP, en SigV4.
     #
