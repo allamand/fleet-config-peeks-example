@@ -851,3 +851,51 @@ platform-manifests-bootstrap:
                 # 720h + 1h = 721h > 504h. Même valeur de remplacement.
                 expireAfter: 480h
                 terminationGracePeriod: 1h
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEVLAKE — POINTE SUR LE GRAFANA DU CLUSTER
+#
+# LE DÉFAUT : `devlake-paris-inference-demo` restait sync=Unknown, jamais
+# rendue. `helm template` échouait sur le sous-chart upstream :
+#   validate.yaml:20 — Helm test requires grafana.enabled to be true or
+#                      grafana.external.url to be provided
+#
+# POURQUOI LA CORRECTION EST ICI ET PAS DANS devlake/values.yaml.
+# J'avais d'abord posé la valeur dans
+# `overlays/clusters/paris-inference-demo/devlake/values.yaml`. Le fichier était
+# BIEN LU — il figurait dans la ligne `helm template --values …` — et pourtant
+# rien ne changeait. La raison : `gitops/addons/registry/platform.yaml:530-534`
+# pose la clé dans le `valuesObject` de l'addon, et un `valuesObject` a la
+# priorité sur TOUS les valueFiles. Ma valeur était écrasée par une chaîne vide.
+# J'ai donc supprimé ce fichier plutôt que de le laisser : un fichier qui ne
+# produit aucun effet est un piège pour la prochaine lecture.
+#
+# CE QUE LE REGISTRY RENDAIT, et pourquoi c'était vide :
+#   url: '{{if …"aws_grafana_url"}}…{{else if eq (…"enable_grafana"|default "false") "true"}}
+#          {{printf "%s/grafana" …ingress_domain_name}}{{end}}'
+# Deux branches, aucune ne s'active chez nous :
+#   - `aws_grafana_url` : annotation ABSENTE du secret de cluster, parce
+#     qu'Amazon Managed Grafana n'existe pas en eu-west-3 et n'a donc jamais
+#     été provisionné ;
+#   - label `enable_grafana` : absent lui aussi. Le secret porte
+#     `enable_grafana_dashboards`, `enable_grafana_operator` et
+#     `enable_grafana_paris`, mais pas `enable_grafana`.
+# Le registry avait donc bien prévu le cas « Grafana dans le cluster », mais
+# pour l'addon standard `grafana`. Le nôtre est `grafana-paris`, un addon que
+# cet overlay apporte, et aucune des deux branches ne le connaît.
+#
+# L'URL est celle du Service rendu par le chart, pas une supposition : le test
+# `helm template` local du même commit a rendu
+#   Service grafana-paris   ports=[80]
+# dans le namespace `grafana-paris`, d'où l'adresse ci-dessous.
+#
+# C'est une URL de LIENS — DevLake s'en sert pour renvoyer vers ses tableaux de
+# bord — et non une dépendance de démarrage.
+# ─────────────────────────────────────────────────────────────────────────────
+devlake:
+  valuesObject:
+    devlake:
+      grafana:
+        enabled: false
+        external:
+          url: http://grafana-paris.grafana-paris.svc.cluster.local
