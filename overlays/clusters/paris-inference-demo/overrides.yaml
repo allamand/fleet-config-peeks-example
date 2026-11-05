@@ -369,6 +369,47 @@ platform-manifests-bootstrap:
   valuesObject:
 
     # ═══════════════════════════════════════════════════════════════════════
+    # 🔬 LEVIER A — UNE SEULE VARIABLE, POSÉE SEULE LE 2026-11-05.
+    #
+    # CE QUE ÇA FAIT : fait rendre au chart son pool de repli
+    # `platform-general` (fallbackNodepools.pools), qui PORTE le label
+    # `node-type: general-purpose`
+    # (gitops/addons/charts/platform-manifests-bootstrap/values.yaml:96).
+    # Le `nodeSelector` de `keda` et de `grafana-paris` devient alors
+    # satisfiable, sans y toucher.
+    #
+    # CE QUE ÇA NE FAIT PAS, ET C'EST LE POINT : ce drapeau ne retire PAS le
+    # pool intégré `general-purpose` du cluster. Le registre le dit lui-même —
+    # il « mirror the cluster's own enableGeneralPurposeNodePool FROM ITS
+    # SECRET ANNOTATION » : c'est un REFLET, pas un pilote. Un chart Helm ne
+    # fait aucun appel EKS. Le pool intégré vient de
+    # `computeConfig.nodePools`, piloté par la spec KRO EksCluster
+    # (rg-eks.yaml:432) depuis `hub.enableGeneralPurposeNodePool` de
+    # config.local.yaml — c'est un réglage de CRÉATION, et c'est le LEVIER B.
+    #
+    # ⛔ NE PAS TIRER LE LEVIER B À CHAUD. Mesuré le 2026-11-05 : les
+    # NodeClaim portent un ownerReference vers leur NodePool avec
+    # `blockOwnerDeletion: True`, donc supprimer le pool DRAINE ses nœuds.
+    # Les deux nœuds `general-purpose` portent 37 pods, dont **les DEUX
+    # répliques de aws-load-balancer-controller sur le MÊME nœud** (tout le
+    # chemin d'ingress de la démo), `metrics-server`, `external-dns`,
+    # `grafana-operator` et 13 composants Crossplane. ArgoCD et ESO et
+    # Keycloak, eux, sont sur les nœuds `system`, que rg-eks.yaml:432
+    # conserve toujours. Dégradation estimée : plusieurs minutes à un quart
+    # d'heure — et NON BORNÉE si le pool de remplacement n'existe pas encore,
+    # ce dont le chart avertit lui-même (« without an untainted pool every
+    # add-on … is unschedulable »).
+    #
+    # POURQUOI SEUL : le paquet complet (branche `wip/paquet-complet`,
+    # 4 commits) retire les `nodeSelector` ET pose `do-not-disrupt` — les deux
+    # correctifs qui MASQUERAIENT l'effet de ce drapeau. Poussé ensemble,
+    # personne ne saurait lequel a planifié KEDA. Donc : `nodeSelector`
+    # INTACTS, annotation ABSENTE, et on lit le résultat.
+    #
+    # Chaîne, pas booléen : le gabarit fait `eq (toString .Values…) "false"`.
+    enableGeneralPurposeNodePool: "false"
+
+    # ═══════════════════════════════════════════════════════════════════════
     # ⚠️ LA NODECLASS N'EST PAS ICI — ET C'EST UNE CORRECTION
     #
     # J'avais d'abord posé la NodeClass dans une clé `customNodeClasses` de ce
