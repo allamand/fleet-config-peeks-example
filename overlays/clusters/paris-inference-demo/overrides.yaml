@@ -2362,9 +2362,50 @@ dcgm-exporter:
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9400"
+    # ═══════════════════════════════════════════════════════════════════════
+    # 🩹 LIMITE MÉMOIRE REMISE AU DÉFAUT DU CHART — 2026-11-06, APRÈS MESURE
+    #
+    # CE BLOC DISAIT `limits: { memory: 256Mi }`, ET C'EST NOTRE PROPRE
+    # RÉGRESSION. Le chart 4.8.1 de NVIDIA pose :
+    #   resources:
+    #     limits:   { cpu: 200m, memory: 512Mi }
+    #     requests: { cpu: 100m, memory: 128Mi }
+    # Nous avions donc DIVISÉ PAR DEUX la limite du fournisseur, sans l'avoir
+    # mesurée. Aucune trace d'une raison : ni commentaire, ni relevé.
+    #
+    # CE QUE LA MESURE A DONNÉ, sur le nœud GPU du plancher (g6.2xlarge, ODCR),
+    # premier nœud GPU réellement démarré depuis l'activation de l'addon :
+    #   dcgm-exporter   Running / ready=false, 106 redémarrages
+    #   DaemonSet       desired=1  current=1  ready=0
+    #   lastState       exitCode 137, reason OOMKilled
+    #   resources vivantes  limits {cpu 200m, memory 256Mi}   ← notre valeur
+    #
+    # Les journaux montrent que le démarrage RÉUSSIT jusqu'au bout de
+    # l'initialisation — « Initialized DCGM Fields module », « NVML provider
+    # successfully initialized for Kubernetes MIG support », « DCGM
+    # successfully initialized! » — puis le conteneur est tué DANS LA MÊME
+    # SECONDE. Ce n'est donc pas une erreur de configuration GPU : le processus
+    # franchit le plafond mémoire au moment où il alloue ses structures.
+    #
+    # LA LIMITE VIVANTE CONFIRME LA FUSION HELM, et c'est utile à savoir pour
+    # relire ce fichier : le template fait `toYaml .Values.resources`, mais
+    # Helm fusionne les MAPS avant. Notre `limits: {memory: 256Mi}` ne
+    # REMPLAÇAIT pas le bloc du chart, il n'en écrasait que la clé `memory` —
+    # d'où le `cpu: 200m` vivant, qui ne vient pas d'ici.
+    #
+    # POURQUOI 512Mi ET PAS UN CHIFFRE PLUS CONFORTABLE. C'est la valeur du
+    # fournisseur pour CE chart et CETTE version, déjà exercée sur du GPU AWS
+    # par ai-on-eks qui épingle le même 4.8.1. Inventer 1Gi « pour être
+    # tranquille » referait exactement la faute qu'on corrige : poser un
+    # plafond non mesuré. La consommation réelle est relevée après atterrissage ;
+    # si elle approche ce plafond, c'est la mesure qui justifiera de le lever.
+    #
+    # `requests` reste à 128Mi : c'est aussi le défaut du chart, et une requête
+    # basse est correcte pour un DaemonSet d'observation.
+    # ═══════════════════════════════════════════════════════════════════════
     resources:
       requests: { cpu: 100m, memory: 128Mi }
-      limits:   { memory: 256Mi }
+      limits:   { memory: 512Mi }
 
 
 platform-manifests-bootstrap:
