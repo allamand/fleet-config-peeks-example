@@ -1,0 +1,110 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Application Argo CD pour le service d'inférence — POSÉE À LA MAIN.
+#
+# ═══ POURQUOI UN OBJET POSÉ À LA MAIN, ET PAS UN ADDON DU REGISTRE ══════════
+# L'`ApplicationSet` du mécanisme d'addons ne peut pas produire cette
+# Application sur la révision épinglée. Lu dans
+# `platform-charts/appset-chart/templates/application-set.yaml:157-160` :
+#
+#   {{- if $chartConfig.path }}
+#   - repoURL: {{ $repoURLGit | squote }}
+#     path: {{ $chartConfig.path | squote }}
+#
+# `$repoURLGit` est une valeur de NIVEAU CHART (`values.yaml:30`, alimentée par
+# l'annotation `addonsRepoURL` du secret de cluster), donc toujours le dépôt
+# appmod. Il n'existe AUCUNE surcharge par addon : les clés `repoURLGit`,
+# `repoURLGitRevision` et `repoURLGitBasePath` que l'overlay pose dans son bloc
+# `gpu-nodeclass-peeks` sont de la configuration MORTE — ce qui se vérifie sur
+# l'Application réellement générée, dont la source 3 pointe sur appmod et dont
+# la condition dit `manifests/gpu-nodeclass: app path does not exist`.
+#
+# Le PR appmod #1268 n'y change rien : il ajoute `customNodeClasses`, soit des
+# NodeClass uniquement.
+#
+# ═══ POURQUOI UNE APPLICATION, ET PAS UN `kubectl apply` DES 5 MANIFESTES ════
+# Un `kubectl apply` direct ne serait rejoué par aucune reconstruction, et
+# toute dérive resterait silencieuse — c'est exactement le défaut de la
+# NodeClass posée à la main. Une Application, elle, fait réconcilier les cinq
+# manifestes PAR ARGO CD depuis git : la dérive est corrigée, l'état est
+# visible dans l'interface, et le contenu reste versionné.
+# Un seul objet est donc posé à la main — celui-ci — au lieu de cinq.
+#
+# ═══ CE QU'IL FAUDRA FAIRE QUAND LA VOIE AMONT EXISTERA ═════════════════════
+# Remplacer cet objet par une déclaration d'addon dans `overrides.yaml`, et
+# SUPPRIMER celui-ci. Tant que les deux coexisteraient, deux contrôleurs se
+# disputeraient les mêmes ressources.
+#
+# ═══ CHOIX DE FORME, ALIGNÉS SUR LES APPLICATIONS EXISTANTES ════════════════
+#   · `destination` par NOM de cluster, pas par URL de serveur : c'est la
+#     convention des Applications déjà déployées ici.
+#   · `prune: false` : convention du dépôt. Retirer un manifeste de git ne
+#     supprimera donc PAS l'objet vivant. Le démontage doit être explicite,
+#     et c'est voulu — on ne veut pas qu'un retrait de fichier détruise un
+#     service en pleine démonstration.
+#   · AUCUN finalizer `resources-finalizer.argocd.argoproj.io` : une
+#     suppression accidentelle de cette Application ne doit pas emporter en
+#     cascade le service et ses nœuds.
+#   · `selfHeal: true` : une modification manuelle sur le cluster est
+#     ramenée à l'état de git.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vllm-paris
+  namespace: argocd
+  labels:
+    managed-by: peeks
+    # Marque explicite : cet objet n'est PAS issu d'un ApplicationSet.
+    peeks.io/applied-by: hand
+  annotations:
+    # Pourquoi cet objet existe, pour qui le lira dans six mois sans contexte.
+    peeks.io/why: >-
+      Posee a la main parce que l appset-chart de la revision epinglee resout
+      toujours le chemin d une source `path` contre le depot appmod, sans
+      surcharge possible par addon. A remplacer par une declaration d addon
+      des que la voie amont existera, en SUPPRIMANT cet objet.
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/allamand/fleet-config-peeks-example
+    # La BRANCHE, et non un SHA : cette Application doit suivre les commits de
+    # la démo, comme le font les sources d'overlay des autres Applications.
+    targetRevision: demo/paris-2026-11-17
+    path: manifests/vllm
+    directory:
+      recurse: false
+  destination:
+    name: paris-inference-demo
+    namespace: vllm
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+      allowEmpty: true
+    syncOptions:
+      - CreateNamespace=true
+      # Les manifestes portent des `sync-wave` : le Namespace en -1, le
+      # Deployment et le Service en 1, le TriggerAuthentication en 2, le
+      # ScaledObject en 3. L'ordre compte — un ScaledObject appliqué avant son
+      # TriggerAuthentication échouerait à résoudre son authentification.
+      - ApplyOutOfSyncOnly=false
+    retry:
+      limit: -1
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 10m
+  revisionHistoryLimit: 3
+  ignoreDifferences:
+    # ⚠️ INDISPENSABLE. Le ScaledObject fait créer une HPA, qui devient
+    # propriétaire de `spec.replicas` du Deployment. Sans cette exception,
+    # Argo CD verrait en permanence une dérive entre le `replicas: 1` de git
+    # et la valeur fixée par la HPA, et `selfHeal` la ramènerait à 1 — en
+    # boucle contre l'autoscaler, pendant la démonstration.
+    - group: apps
+      kind: Deployment
+      name: vllm-mistral
+      namespace: vllm
+      jsonPointers:
+        - /spec/replicas
