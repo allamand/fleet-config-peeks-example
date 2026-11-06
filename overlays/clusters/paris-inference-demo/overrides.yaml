@@ -483,6 +483,1733 @@ grafana-paris:
       requests: { cpu: 100m, memory: 256Mi }
       limits:   { memory: 512Mi }
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # 📊 LES TROIS TABLEAUX DE BORD DE LA DÉMO — AJOUTÉS le 2026-11-06
+    #
+    # POURQUOI ICI, et pas dans overlays/clusters/.../grafana/values.yaml où
+    # vit le `dashboards: null` : `valuesObject` est appliqué APRÈS tous les
+    # valueFiles. Le `null` du valueFile écrase la table héritée d'appmod
+    # (`dashboards: {enabled: true, custom: {...}}`, qui cassait le rendu),
+    # puis cette table-ci en repose une neuve, ne contenant que notre
+    # provider. Les deux conceptions ont été rendues localement et comparées :
+    #   dashboards ici ............... 1 ConfigMap, 0 vide, 1 volume
+    #   dashboards dans le valueFile,
+    #     avec enabled/custom à null .. 3 ConfigMaps, 2 vides, 3 volumes
+    # pour un contenu utile identique.
+    #
+    # ─── PROVENANCE DES NOMS DE MÉTRIQUES ────────────────────────────────
+    # RÈGLE TENUE SANS EXCEPTION : un nom n'entre dans un panneau de requête
+    # que s'il a été LU dans une source citée. Les 37 noms employés par les
+    # trois tableaux ont été contrôlés un par un, par programme, contre :
+    #
+    #   vLLM   36 noms   vllm/v1/metrics/loggers.py, tag upstream v0.10.2
+    #                    (01efc7ef) — la version qu'installe
+    #                    cluster-providers/common/Dockerfile.ray-vllm
+    #                    (`vllm[runai]==0.10.2`). L'image ECR est taguée
+    #                    `:latest` ; l'épinglage réel est dans ce Dockerfile.
+    #                    Labels : `model_name`, `engine`.
+    #   DCGM   26 noms   ConfigMap `exporter-metrics-config-map` (clé
+    #                    `metrics`) RÉELLEMENT déployée dans `monitoring`, que
+    #                    le DaemonSet monte via
+    #                    `-f /etc/dcgm-exporter/default-counters.csv`. Contenu
+    #                    identique aux défauts du chart 4.8.1.
+    #   KEDA   13 noms   pkg/metricscollector/prommetrics.go, tag v2.19.0
+    #                    (3f88d60a), opérateur port 8080. Les 2 métriques du
+    #                    webhook sortent sur un autre composant : exclues.
+    #
+    # ⚠️ PIÈGE DCGM, à ne pas rejouer : le `values.yaml` du chart énumère 52
+    #   noms `DCGM_FI_*`, mais 25 y sont COMMENTÉS et ne produiront JAMAIS de
+    #   série. Seuls les 26 ACTIFS sont utilisés ici. Un tableau bâti sur les
+    #   52 afficherait « No data » à jamais sur la moitié de ses panneaux.
+    #
+    # ⚠️ PIÈGE vLLM : quatre noms sont DÉPRÉCIÉS en 0.10.2 et volontairement
+    #   NON utilisés — `gpu_cache_usage_perc` (→ `kv_cache_usage_perc`),
+    #   `gpu_prefix_cache_hits` (→ `prefix_cache_hits`),
+    #   `gpu_prefix_cache_queries` (→ `prefix_cache_queries`),
+    #   `time_per_output_token_seconds` (→ `inter_token_latency_seconds`).
+    #
+    # ─── CE QUI EST VIVANT AUJOURD'HUI (mesuré dans AMP le 2026-11-06) ───
+    #   keda_build_info   1 série    ← le SEUL nom confirmé vivant
+    #   DCGM_FI_*         0 série    ← DaemonSet à desired=0, aucun nœud GPU
+    #   vllm:*            0 série    ← aucun chemin de collecte, voir ci-dessous
+    #
+    # ⚠️ vLLM N'A AUCUN CHEMIN DE COLLECTE. Ce n'est pas une absence de
+    #   charge, c'est une absence de scrape :
+    #     - les pods `ray-service` ne portent AUCUNE annotation
+    #       `prometheus.io/scrape`, donc le job `kubernetes-pods` les ignore ;
+    #     - vLLM expose /metrics sur le port 8000, et le seul job par port,
+    #       `polyglot_app_config`, ne garde que `:8080`.
+    #   À TRANCHER AVANT LE 17/11. Les deux correctifs touchent appmod
+    #   (manifeste KRO du ray-service, ou chart observability-aws), donc hors
+    #   de ce commit. DCGM, lui, a un chemin VALIDE : son Service porte
+    #   `prometheus.io/scrape: "true"` et `prometheus.io/port: "9400"`, que le
+    #   job `kubernetes-service-endpoints` garde.
+    #
+    # ─── PAS DE `datasource` DANS LES PANNEAUX ───────────────────────────
+    # Aucun panneau ne fige d'uid. La source AMP est `isDefault: true`
+    # (vérifié ci-dessus dans ce même fichier), donc Grafana la résout à la
+    # requête. Figer `PD476F800710936AE` rendrait les trois tableaux muets si
+    # un futur `hub:seed` le régénérait.
+    #
+    # Chaque tableau porte en tête un panneau « Provenance et limites » qui
+    # nomme ses sources et liste ce qui reste « à confirmer le 10/11 ».
+    # ═══════════════════════════════════════════════════════════════════════
+    dashboards:
+      peeks-paris:
+        # vLLM — 12 noms employés, lus dans vllm/v1/metrics/loggers.py au tag
+        # upstream v0.10.2 (01efc7ef), la version installée par Dockerfile.ray-vllm.
+        peeks-paris-vllm:
+          json: |-
+            {
+              "uid": "peeks-paris-vllm",
+              "title": "PEEKS Paris — vLLM (inference)",
+              "description": "Noms lus dans le code vLLM au tag v0.10.2 (01efc7ef). Aucune serie n arrive dans AMP a ce jour : voir le panneau de provenance.",
+              "tags": [
+                "peeks",
+                "paris",
+                "vllm",
+                "inference"
+              ],
+              "timezone": "Europe/Paris",
+              "editable": true,
+              "schemaVersion": 39,
+              "version": 1,
+              "refresh": "30s",
+              "time": {
+                "from": "now-1h",
+                "to": "now"
+              },
+              "panels": [
+                {
+                  "id": 1,
+                  "type": "text",
+                  "title": "Provenance et limites",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 0,
+                    "w": 24,
+                    "h": 9
+                  },
+                  "options": {
+                    "mode": "markdown",
+                    "content": "**Source des noms** : `vllm/v1/metrics/loggers.py`, tag upstream `v0.10.2` (`01efc7ef`), qui est la version installee par `Dockerfile.ray-vllm` (`vllm[runai]==0.10.2`). Labels : `model_name`, `engine`.\n\n> ### ⚠️ AUCUNE DE CES SERIES N ARRIVE DANS AMP AUJOURD HUI\n> Verifie le 2026-11-06 : `vllm:*` rend **0 nom** dans AMP.\n> La cause n est pas l absence de charge, c est l absence de chemin de collecte :\n> - les pods `ray-service` ne portent **aucune** annotation `prometheus.io/scrape`, donc le job `kubernetes-pods` les ignore ;\n> - vLLM expose `/metrics` sur le port **8000**, et le seul job par port, `polyglot_app_config`, ne garde que `:8080`.\n\n> **A trancher avant le 17/11** : annoter les pods ray (`prometheus.io/scrape: \"true\"`, `prometheus.io/port: \"8000\"`) ou ajouter un job. Les deux touchent appmod, donc hors de ce commit.\n\n**A confirmer le 10/11** — ces 3 noms etaient attendus mais sont **absents** du code en 0.10.2 :\n`vllm:prompt_tokens_cached` · `vllm:request_time_per_output_token_seconds` · `vllm:num_requests_waiting_by_reason`\n\n**Noms deprecies en 0.10.2, deliberement NON utilises ici** : `vllm:gpu_cache_usage_perc` (-> `kv_cache_usage_perc`), `vllm:gpu_prefix_cache_hits` (-> `prefix_cache_hits`), `vllm:gpu_prefix_cache_queries` (-> `prefix_cache_queries`), `vllm:time_per_output_token_seconds` (-> `inter_token_latency_seconds`)."
+                  }
+                },
+                {
+                  "id": 2,
+                  "type": "stat",
+                  "title": "Requetes en cours",
+                  "description": "loggers.py:189 — gauge num_requests_running",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 9,
+                    "w": 4,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(vllm:num_requests_running)",
+                      "legendFormat": "running",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {},
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 3,
+                  "type": "stat",
+                  "title": "Requetes en attente",
+                  "description": "loggers.py:198 — c est CE signal que KEDA doit suivre",
+                  "gridPos": {
+                    "x": 4,
+                    "y": 9,
+                    "w": 4,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(vllm:num_requests_waiting)",
+                      "legendFormat": "waiting",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {},
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 4,
+                  "type": "stat",
+                  "title": "KV cache utilise",
+                  "description": "loggers.py:245 — nom COURANT en 0.10.2. gpu_cache_usage_perc est l ancien nom, deprecie.",
+                  "gridPos": {
+                    "x": 8,
+                    "y": 9,
+                    "w": 4,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "max(vllm:kv_cache_usage_perc)",
+                      "legendFormat": "kv cache",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "unit": "percentunit",
+                      "max": 1
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 5,
+                  "type": "stat",
+                  "title": "Debit de generation",
+                  "description": "loggers.py:286 — compteur generation_tokens",
+                  "gridPos": {
+                    "x": 12,
+                    "y": 9,
+                    "w": 4,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(rate(vllm:generation_tokens[5m]))",
+                      "legendFormat": "tok/s",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "unit": "none"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 6,
+                  "type": "stat",
+                  "title": "Prefix cache, taux de reutilisation",
+                  "description": "loggers.py:260 et 252 — noms COURANTS",
+                  "gridPos": {
+                    "x": 16,
+                    "y": 9,
+                    "w": 4,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(rate(vllm:prefix_cache_hits[15m])) / clamp_min(sum(rate(vllm:prefix_cache_queries[15m])), 1)",
+                      "legendFormat": "hit ratio",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "unit": "percentunit",
+                      "max": 1
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 7,
+                  "type": "stat",
+                  "title": "Preemptions",
+                  "description": "loggers.py:271",
+                  "gridPos": {
+                    "x": 20,
+                    "y": 9,
+                    "w": 4,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(rate(vllm:num_preemptions[15m]))",
+                      "legendFormat": "preempt/s",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {},
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 8,
+                  "type": "timeseries",
+                  "title": "Requetes : en cours et en attente",
+                  "description": "Le creux de 'en attente' est ce que la montee en charge doit produire.",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 13,
+                    "w": 12,
+                    "h": 8
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(vllm:num_requests_running)",
+                      "legendFormat": "en cours",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "sum(vllm:num_requests_waiting)",
+                      "legendFormat": "en attente",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 9,
+                  "type": "timeseries",
+                  "title": "Occupation du KV cache",
+                  "description": "loggers.py:245",
+                  "gridPos": {
+                    "x": 12,
+                    "y": 13,
+                    "w": 12,
+                    "h": 8
+                  },
+                  "targets": [
+                    {
+                      "expr": "vllm:kv_cache_usage_perc",
+                      "legendFormat": "{{model_name}} / engine {{engine}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      },
+                      "unit": "percentunit"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 10,
+                  "type": "timeseries",
+                  "title": "Time to first token (p50 / p95 / p99)",
+                  "description": "loggers.py:369 — histogramme, d ou le _bucket",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 21,
+                    "w": 12,
+                    "h": 8
+                  },
+                  "targets": [
+                    {
+                      "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
+                      "legendFormat": "p50",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
+                      "legendFormat": "p95",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
+                      "legendFormat": "p99",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      },
+                      "unit": "s"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 11,
+                  "type": "timeseries",
+                  "title": "Latence inter-token (p50 / p95)",
+                  "description": "loggers.py:396 — nom COURANT. time_per_output_token_seconds est deprecie (0.11).",
+                  "gridPos": {
+                    "x": 12,
+                    "y": 21,
+                    "w": 12,
+                    "h": 8
+                  },
+                  "targets": [
+                    {
+                      "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket[5m])))",
+                      "legendFormat": "p50",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket[5m])))",
+                      "legendFormat": "p95",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      },
+                      "unit": "s"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 12,
+                  "type": "timeseries",
+                  "title": "Latence de bout en bout (p95)",
+                  "description": "loggers.py:411",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 29,
+                    "w": 8,
+                    "h": 7
+                  },
+                  "targets": [
+                    {
+                      "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket[5m])))",
+                      "legendFormat": "p95 e2e",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      },
+                      "unit": "s"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 13,
+                  "type": "timeseries",
+                  "title": "Attente en file (p95)",
+                  "description": "loggers.py:419",
+                  "gridPos": {
+                    "x": 8,
+                    "y": 29,
+                    "w": 8,
+                    "h": 7
+                  },
+                  "targets": [
+                    {
+                      "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:request_queue_time_seconds_bucket[5m])))",
+                      "legendFormat": "p95 file",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      },
+                      "unit": "s"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 14,
+                  "type": "timeseries",
+                  "title": "Jetons : prompt et generation",
+                  "description": "loggers.py:278 et 286",
+                  "gridPos": {
+                    "x": 16,
+                    "y": 29,
+                    "w": 8,
+                    "h": 7
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(rate(vllm:prompt_tokens[5m]))",
+                      "legendFormat": "prompt/s",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "sum(rate(vllm:generation_tokens[5m]))",
+                      "legendFormat": "generation/s",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                }
+              ]
+            }
+
+        # GPU — 14 noms employés, pris dans les 26 compteurs ACTIFS de la ConfigMap
+        # exporter-metrics-config-map réellement déployée (= défauts du chart 4.8.1).
+        peeks-paris-gpu:
+          json: |-
+            {
+              "uid": "peeks-paris-gpu",
+              "title": "PEEKS Paris — GPU (DCGM)",
+              "description": "26 compteurs actifs lus dans la ConfigMap deployee exporter-metrics-config-map (chart dcgm-exporter 4.8.1).",
+              "tags": [
+                "peeks",
+                "paris",
+                "gpu",
+                "dcgm"
+              ],
+              "timezone": "Europe/Paris",
+              "editable": true,
+              "schemaVersion": 39,
+              "version": 1,
+              "refresh": "30s",
+              "time": {
+                "from": "now-1h",
+                "to": "now"
+              },
+              "panels": [
+                {
+                  "id": 1,
+                  "type": "text",
+                  "title": "Provenance et limites",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 0,
+                    "w": 24,
+                    "h": 9
+                  },
+                  "options": {
+                    "mode": "markdown",
+                    "content": "**Source des noms** : ConfigMap `exporter-metrics-config-map` (cle `metrics`) reellement deployee dans le namespace `monitoring`, montee par le DaemonSet via `-f /etc/dcgm-exporter/default-counters.csv`. Son contenu est identique aux defauts du chart `dcgm-exporter` 4.8.1. Image : `dcgm-exporter:4.5.2-4.8.1-distroless`.\n\n**26 compteurs sont ACTIFS, 25 sont COMMENTES** dans ce fichier. Seuls les 26 actifs produiront une serie ; les panneaux ci-dessous n utilisent que ceux-la. Un dashboard bati sur le catalogue complet de `values.yaml` (52 noms) afficherait « No data » pour toujours sur la moitie de ses panneaux.\n\n> **Etat au 2026-11-06** : le DaemonSet est a `desired=0`, donc `DCGM_FI_*` rend **0 nom** dans AMP. C est attendu : il est restreint aux noeuds GPU par `nodeAffinity` et aucun n est demarre. Le chemin de collecte, lui, est **valide** — le Service `dcgm-exporter` porte `prometheus.io/scrape: \"true\"` et `prometheus.io/port: \"9400\"`, que le job `kubernetes-service-endpoints` garde.\n\n**A confirmer le 10/11** : les valeurs et les labels reels, des que le premier noeud GPU demarre. Les NOMS sont surs, leur cardinalite (`gpu`, `UUID`, `modelName`, `Hostname`) ne l est pas encore."
+                  }
+                },
+                {
+                  "id": 2,
+                  "type": "stat",
+                  "title": "GPU occupes",
+                  "description": "config-map:23",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 9,
+                    "w": 4,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "count(DCGM_FI_DEV_GPU_UTIL > 0)",
+                      "legendFormat": "actifs",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {},
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 3,
+                  "type": "stat",
+                  "title": "Occupation GPU (max)",
+                  "description": "config-map:23 — en pourcent, 0-100",
+                  "gridPos": {
+                    "x": 4,
+                    "y": 9,
+                    "w": 4,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "max(DCGM_FI_DEV_GPU_UTIL)",
+                      "legendFormat": "util",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "unit": "percent",
+                      "max": 100
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 4,
+                  "type": "stat",
+                  "title": "Temperature max",
+                  "description": "config-map:11",
+                  "gridPos": {
+                    "x": 8,
+                    "y": 9,
+                    "w": 4,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "max(DCGM_FI_DEV_GPU_TEMP)",
+                      "legendFormat": "temp",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "unit": "celsius"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 5,
+                  "type": "stat",
+                  "title": "Puissance totale",
+                  "description": "config-map:14",
+                  "gridPos": {
+                    "x": 12,
+                    "y": 9,
+                    "w": 4,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(DCGM_FI_DEV_POWER_USAGE)",
+                      "legendFormat": "watts",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "unit": "watt"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 6,
+                  "type": "stat",
+                  "title": "Memoire GPU utilisee",
+                  "description": "config-map:39 et 38 — en MiB, d ou le ratio",
+                  "gridPos": {
+                    "x": 16,
+                    "y": 9,
+                    "w": 4,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(DCGM_FI_DEV_FB_USED) / clamp_min(sum(DCGM_FI_DEV_FB_USED) + sum(DCGM_FI_DEV_FB_FREE), 1)",
+                      "legendFormat": "FB",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "unit": "percentunit",
+                      "max": 1
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 7,
+                  "type": "stat",
+                  "title": "Erreurs XID",
+                  "description": "config-map:29 — tout non-zero est un incident materiel",
+                  "gridPos": {
+                    "x": 20,
+                    "y": 9,
+                    "w": 4,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(DCGM_FI_DEV_XID_ERRORS)",
+                      "legendFormat": "XID",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {},
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 8,
+                  "type": "timeseries",
+                  "title": "Occupation GPU, par GPU",
+                  "description": "config-map:23",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 13,
+                    "w": 12,
+                    "h": 8
+                  },
+                  "targets": [
+                    {
+                      "expr": "DCGM_FI_DEV_GPU_UTIL",
+                      "legendFormat": "{{Hostname}} gpu {{gpu}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      },
+                      "unit": "percent"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 9,
+                  "type": "timeseries",
+                  "title": "Activite des Tensor Cores et du moteur graphique",
+                  "description": "config-map:76 et 73 — ratios 0-1, pas des pourcents. Tensor bas avec GPU_UTIL haut = le modele ne tire pas parti des Tensor Cores.",
+                  "gridPos": {
+                    "x": 12,
+                    "y": 13,
+                    "w": 12,
+                    "h": 8
+                  },
+                  "targets": [
+                    {
+                      "expr": "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE",
+                      "legendFormat": "tensor {{Hostname}} gpu {{gpu}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "DCGM_FI_PROF_GR_ENGINE_ACTIVE",
+                      "legendFormat": "gr engine {{Hostname}} gpu {{gpu}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      },
+                      "unit": "percentunit"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 10,
+                  "type": "timeseries",
+                  "title": "Memoire GPU (framebuffer)",
+                  "description": "config-map:39 et 38 — en MiB",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 21,
+                    "w": 12,
+                    "h": 8
+                  },
+                  "targets": [
+                    {
+                      "expr": "DCGM_FI_DEV_FB_USED",
+                      "legendFormat": "utilise {{Hostname}} gpu {{gpu}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "DCGM_FI_DEV_FB_FREE",
+                      "legendFormat": "libre {{Hostname}} gpu {{gpu}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      },
+                      "unit": "decmbytes"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 11,
+                  "type": "timeseries",
+                  "title": "Temperature et puissance",
+                  "description": "config-map:11, 10 et 14",
+                  "gridPos": {
+                    "x": 12,
+                    "y": 21,
+                    "w": 12,
+                    "h": 8
+                  },
+                  "targets": [
+                    {
+                      "expr": "DCGM_FI_DEV_GPU_TEMP",
+                      "legendFormat": "GPU {{Hostname}} gpu {{gpu}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "DCGM_FI_DEV_MEMORY_TEMP",
+                      "legendFormat": "memoire {{Hostname}} gpu {{gpu}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "DCGM_FI_DEV_POWER_USAGE",
+                      "legendFormat": "watts {{Hostname}} gpu {{gpu}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 12,
+                  "type": "timeseries",
+                  "title": "Bande passante PCIe",
+                  "description": "config-map:82 et 81 — definis en gauge aux lignes 81-82 ; les lignes 31-32, en counter, sont commentees",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 29,
+                    "w": 8,
+                    "h": 7
+                  },
+                  "targets": [
+                    {
+                      "expr": "rate(DCGM_FI_PROF_PCIE_RX_BYTES[5m])",
+                      "legendFormat": "RX {{gpu}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "rate(DCGM_FI_PROF_PCIE_TX_BYTES[5m])",
+                      "legendFormat": "TX {{gpu}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      },
+                      "unit": "Bps"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 13,
+                  "type": "timeseries",
+                  "title": "Horloges",
+                  "description": "config-map:6 et 7 — en MHz",
+                  "gridPos": {
+                    "x": 8,
+                    "y": 29,
+                    "w": 8,
+                    "h": 7
+                  },
+                  "targets": [
+                    {
+                      "expr": "DCGM_FI_DEV_SM_CLOCK",
+                      "legendFormat": "SM {{gpu}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "DCGM_FI_DEV_MEM_CLOCK",
+                      "legendFormat": "memoire {{gpu}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      },
+                      "unit": "rothz"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 14,
+                  "type": "timeseries",
+                  "title": "Energie consommee (cumul)",
+                  "description": "config-map:15 — compteur, en millijoules",
+                  "gridPos": {
+                    "x": 16,
+                    "y": 29,
+                    "w": 8,
+                    "h": 7
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(rate(DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION[5m]))",
+                      "legendFormat": "mJ/s",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                }
+              ]
+            }
+
+        # KEDA — 11 noms employés, lus dans pkg/metricscollector/prommetrics.go au
+        # tag v2.19.0 (3f88d60a), opérateur sur le port 8080.
+        peeks-paris-keda:
+          json: |-
+            {
+              "uid": "peeks-paris-keda",
+              "title": "PEEKS Paris — KEDA (autoscaling)",
+              "description": "13 noms lus dans KEDA v2.19.0 (3f88d60a), operateur port 8080. Seul keda_build_info est confirme vivant a ce jour.",
+              "tags": [
+                "peeks",
+                "paris",
+                "keda",
+                "autoscaling"
+              ],
+              "timezone": "Europe/Paris",
+              "editable": true,
+              "schemaVersion": 39,
+              "version": 1,
+              "refresh": "30s",
+              "time": {
+                "from": "now-1h",
+                "to": "now"
+              },
+              "panels": [
+                {
+                  "id": 1,
+                  "type": "text",
+                  "title": "Provenance et limites",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 0,
+                    "w": 24,
+                    "h": 10
+                  },
+                  "options": {
+                    "mode": "markdown",
+                    "content": "**Source des noms** : `pkg/metricscollector/prommetrics.go`, tag upstream `v2.19.0` (`3f88d60a`). Le nom final est `<Namespace>_<Subsystem>_<Name>` avec `DefaultPromMetricsNamespace = \"keda\"`.\n\n**13 noms pour l operateur**, exposes sur le port **8080** (`prometheus.operator.port`, active par `prometheus.operator.enabled`). Le port 9666 est du gRPC, pas des metriques.\n\nLes 2 metriques du **webhook** (`keda_webhook_scaled_object_validations_total`, `..._validation_errors_total`) sortent sur un AUTRE composant et un autre port : elles sont volontairement absentes d ici.\n\n> ### Un seul nom est confirme vivant\n> Mesure du 2026-11-06 sur l endpoint reel du pod (`10.60.12.144:8080`, 178 075 octets) **et** dans AMP : le prefixe `keda_` rend exactement **1** nom, `keda_build_info`.\n> La raison n est pas une panne : il y a **0 ScaledObject et 0 ScaledJob** sur ce cluster. Les 12 autres metriques sont etiquetees par `scaledObject` / `scaler`, donc elles n existent pas avant qu un objet soit mis a l echelle.\n\n**A confirmer le 10/11** : les 12 noms autres que `keda_build_info`, des que le premier ScaledObject de la demo existe. Ils sont surs dans le code ; ils ne sont pas encore observes ici."
+                  }
+                },
+                {
+                  "id": 2,
+                  "type": "stat",
+                  "title": "KEDA — version en service",
+                  "description": "prommetrics.go:37 — LE SEUL nom deja confirme vivant, sur l endpoint et dans AMP",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 10,
+                    "w": 6,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "keda_build_info",
+                      "legendFormat": "{{version}}",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {},
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 3,
+                  "type": "stat",
+                  "title": "Scalers actifs",
+                  "description": "prommetrics.go:63 — a confirmer le 10/11",
+                  "gridPos": {
+                    "x": 6,
+                    "y": 10,
+                    "w": 6,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(keda_scaler_active)",
+                      "legendFormat": "actifs",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {},
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 4,
+                  "type": "stat",
+                  "title": "Objets enregistres",
+                  "description": "prommetrics.go:117 — a confirmer le 10/11",
+                  "gridPos": {
+                    "x": 12,
+                    "y": 10,
+                    "w": 6,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(keda_resource_registered_total)",
+                      "legendFormat": "objets",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {},
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 5,
+                  "type": "stat",
+                  "title": "Erreurs de scaler (15 min)",
+                  "description": "prommetrics.go:81 — a confirmer le 10/11",
+                  "gridPos": {
+                    "x": 18,
+                    "y": 10,
+                    "w": 6,
+                    "h": 4
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(increase(keda_scaler_detail_errors_total[15m]))",
+                      "legendFormat": "erreurs",
+                      "refId": "A",
+                      "editorMode": "code",
+                      "instant": true,
+                      "range": false
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {},
+                    "overrides": []
+                  },
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    }
+                  }
+                },
+                {
+                  "id": 6,
+                  "type": "timeseries",
+                  "title": "Valeur lue par chaque scaler",
+                  "description": "prommetrics.go:45 — c est la valeur que la HPA compare a sa cible. Pour la demo, elle doit suivre vllm:num_requests_waiting. A confirmer le 10/11.",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 14,
+                    "w": 12,
+                    "h": 8
+                  },
+                  "targets": [
+                    {
+                      "expr": "keda_scaler_metrics_value",
+                      "legendFormat": "{{scaledObject}} / {{scaler}} / {{metric}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 7,
+                  "type": "timeseries",
+                  "title": "Scaler actif (1) ou non (0)",
+                  "description": "prommetrics.go:63 — a confirmer le 10/11",
+                  "gridPos": {
+                    "x": 12,
+                    "y": 14,
+                    "w": 12,
+                    "h": 8
+                  },
+                  "targets": [
+                    {
+                      "expr": "keda_scaler_active",
+                      "legendFormat": "{{scaledObject}} / {{scaler}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 8,
+                  "type": "timeseries",
+                  "title": "Latence de lecture des scalers",
+                  "description": "prommetrics.go:54 — en SECONDES. A confirmer le 10/11.",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 22,
+                    "w": 12,
+                    "h": 7
+                  },
+                  "targets": [
+                    {
+                      "expr": "keda_scaler_metrics_latency_seconds",
+                      "legendFormat": "{{scaledObject}} / {{scaler}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      },
+                      "unit": "s"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 9,
+                  "type": "timeseries",
+                  "title": "Latence de la boucle de scaling",
+                  "description": "prommetrics.go:126 — a confirmer le 10/11",
+                  "gridPos": {
+                    "x": 12,
+                    "y": 22,
+                    "w": 12,
+                    "h": 7
+                  },
+                  "targets": [
+                    {
+                      "expr": "keda_internal_scale_loop_latency_seconds",
+                      "legendFormat": "{{type}} {{resource}}",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      },
+                      "unit": "s"
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 10,
+                  "type": "timeseries",
+                  "title": "Erreurs, par origine",
+                  "description": "prommetrics.go:90, 99 et 81 — a confirmer le 10/11",
+                  "gridPos": {
+                    "x": 0,
+                    "y": 29,
+                    "w": 12,
+                    "h": 7
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(rate(keda_scaled_object_errors_total[5m]))",
+                      "legendFormat": "ScaledObject",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "sum(rate(keda_scaled_job_errors_total[5m]))",
+                      "legendFormat": "ScaledJob",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "sum(rate(keda_scaler_detail_errors_total[5m]))",
+                      "legendFormat": "scaler",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                },
+                {
+                  "id": 11,
+                  "type": "timeseries",
+                  "title": "ScaledObjects en pause / triggers enregistres",
+                  "description": "prommetrics.go:72 et 108 — un ScaledObject en pause pendant la demo expliquerait une absence de montee en charge. A confirmer le 10/11.",
+                  "gridPos": {
+                    "x": 12,
+                    "y": 29,
+                    "w": 12,
+                    "h": 7
+                  },
+                  "targets": [
+                    {
+                      "expr": "sum(keda_scaled_object_paused)",
+                      "legendFormat": "en pause",
+                      "refId": "A",
+                      "editorMode": "code"
+                    },
+                    {
+                      "expr": "sum(keda_trigger_registered_total)",
+                      "legendFormat": "triggers",
+                      "refId": "A",
+                      "editorMode": "code"
+                    }
+                  ],
+                  "fieldConfig": {
+                    "defaults": {
+                      "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 8,
+                        "showPoints": "never"
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "options": {
+                    "legend": {
+                      "displayMode": "list",
+                      "placement": "bottom"
+                    },
+                    "tooltip": {
+                      "mode": "multi",
+                      "sort": "desc"
+                    }
+                  }
+                }
+              ]
+            }
+
+    # Le provider qui charge les trois tableaux. Sans cette section, les
+    # ConfigMaps seraient bien créés mais Grafana ne les lirait pas : le nom
+    # du provider doit correspondre EXACTEMENT à la clé utilisée sous
+    # `dashboards:` (ici `peeks-paris`), car le chart monte chaque fichier
+    # sous `/var/lib/grafana/dashboards/<provider>/`.
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+          - name: peeks-paris
+            orgId: 1
+            folder: PEEKS Paris
+            type: file
+            # Suppression et édition laissées possibles : pendant la
+            # répétition du 10/11, on veut pouvoir corriger un panneau à
+            # chaud sans attendre un cycle GitOps. Argo CD rétablira le
+            # fichier au sync suivant.
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/peeks-paris
+
 # ─────────────────────────────────────────────────────────────────────────────
 # DCGM EXPORTER — ÉCRIT MAIS SUSPENDU
 #

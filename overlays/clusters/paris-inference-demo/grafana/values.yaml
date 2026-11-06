@@ -8,26 +8,48 @@
 #     executing "grafana.configData" at <$dashboards>:
 #       range can't iterate over true
 #
-# LA CAUSE : `gitops/addons/configs/grafana/values.yaml:48-50` (dans appmod)
-# pose `dashboards: {enabled: true}`. C'est la convention du chart INTERNE
-# `gitops/addons/charts/grafana`. Mais `grafana-paris` consomme le chart
-# UPSTREAM `grafana/grafana` 10.5.15, où `dashboards` est un MAP de dashboards à
-# provisionner, que `_config.tpl:86` parcourt avec `range`. Le `range` tombe
-# alors sur la valeur booléenne `true` et le rendu casse.
+# LA CAUSE : `gitops/addons/configs/grafana/values.yaml:48-65` (dans appmod)
+# pose `dashboards: {enabled: true, custom: {rust: ...}}`. C'est la convention
+# du chart INTERNE `gitops/addons/charts/grafana`, pensée pour grafana-operator
+# et un Grafana EXTERNE (d'où le `instanceSelector`). Mais `grafana-paris`
+# consomme le chart UPSTREAM `grafana/grafana` 10.5.15, où `dashboards` est un
+# MAP « provider -> dashboards ». Lu dans le chart, à
+# `templates/dashboards-json-configmap.yaml:3` :
+#
+#   {{- range $provider, $dashboards := .Values.dashboards }}
+#   {{- range $key, $value := $dashboards }}
+#
+# Le premier `range` donne $provider="enabled" et $dashboards=true ; le second
+# ne peut pas itérer sur un booléen, et le rendu casse.
 #
 # POURQUOI CE FICHIER ET PAS configs/grafana/values.yaml DE CET OVERLAY :
 # ce dépôt est PARTAGÉ avec peeks-a-hub et peeks-b-hub, et `configs/*` est lu
 # par TOUS les clusters qui le consomment. Ce tier-ci
-# (overlays/clusters/paris-inference-demo/<addon>/values.yaml) est le dernier
-# valueFile de la chaîne ET il ne concerne que notre hub. Vérifié sur les
-# valueFiles réellement rendus de l'Application :
-#   $defaults/gitops/addons/configs/grafana/values.yaml          <- pose le defaut
-#   ...
-#   $overlay/overlays/clusters/paris-inference-demo/grafana/values.yaml  <- CE FICHIER, en dernier
+# (overlays/clusters/paris-inference-demo/<addon>/values.yaml) ne concerne que
+# notre hub. Vérifié sur les Applications réellement déployées : ce chemin
+# n'est référencé que par `grafana-paris-paris-inference-demo`.
 #
 # POURQUOI `null` ET PAS `{}` : Helm fusionne les tables en profondeur. Un
-# `dashboards: {}` ne remplacerait rien et `{enabled: true}` survivrait. Seul un
-# `null` explicite SUPPRIME la clé héritée. Vérifié par `helm template` local
-# avant le push, pas déduit de la documentation.
+# `dashboards: {}` ne remplacerait rien et `{enabled: true}` survivrait. Seul
+# un `null` SUR LA CLÉ ENTIÈRE écrase la table héritée.
+#
+# ⚠️ ET POURQUOI PAS `enabled: null` + `custom: null` ICI, avec les dashboards
+# dans ce même fichier : parce que c'est MESURÉ comme moins propre. Un `null`
+# sur une SOUS-clé ne la supprime pas, il la met à nil — le `range` l'itère
+# alors comme vide, ce qui répare bien le rendu MAIS fait naître deux
+# ConfigMaps parasites `grafana-paris-dashboards-enabled` et
+# `...-dashboards-custom`, plus leurs deux volumes. Les deux rendus ont été
+# comparés localement sur la vraie chaîne de valueFiles :
+#
+#   tout ici, avec enabled:null + custom:null .... 3 ConfigMaps, dont 2 vides
+#   `null` ici + dashboards dans valuesObject ... 1 ConfigMap, 0 vide
+#
+# avec un contenu utile identique. D'où la forme retenue.
+#
+# ➜ LES TROIS TABLEAUX DE BORD NE SONT DONC PAS ICI. Ils sont dans
+#   `overrides.yaml`, sous `grafana-paris.valuesObject.dashboards`, parce que
+#   `valuesObject` est appliqué APRÈS tous les valueFiles : le `null`
+#   ci-dessous écrase l'héritage, puis `valuesObject` repose une table neuve
+#   qui ne contient que notre provider.
 # ─────────────────────────────────────────────────────────────────────────────
 dashboards: null
