@@ -1,0 +1,20 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Namespace du service d'inférence.
+#
+# Séparé du namespace `ray-system` de la voie Ray : cette démo sert le modèle
+# par un Deployment vLLM simple, sans KubeRay. Le choix est assumé — la voie
+# Ray demande le RGD `HuggingFaceModel`, un bucket S3 de modèles
+# (`<préfixe>-ray-models-<compte>`, qui N'EXISTE PAS dans ce compte, vérifié
+# par `head-bucket` → 404) et une image ECR construite par CodeBuild
+# (`<préfixe>-ray-vllm-custom`, dépôt ABSENT lui aussi, vérifié par
+# `describe-repositories`).
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vllm
+  labels:
+    app.kubernetes.io/part-of: peeks-paris-demo
+    managed-by: peeks
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"

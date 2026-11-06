@@ -1,0 +1,118 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ScaledObject — la mise à l'échelle de la démo.
+#
+# ═══ PARAMÈTRES, TELS QUE TRANCHÉS ═══════════════════════════════════════════
+# `maxReplicaCount: 4`, conformément à la planche 16 : la démonstration doit
+# montrer la montée jusqu'à 4 répliques, pas 2.
+# `minReplicaCount: 1` : le plancher reste servi en permanence, sur le nœud de
+# la réservation de capacité, qui est déjà payée.
+#
+# ═══ TOUTES LES CLÉS SONT VÉRIFIÉES À LA SOURCE ══════════════════════════════
+# Lues dans `pkg/scalers/prometheus_scaler.go` au tag v2.19.0 (3f88d60a) :
+#   serverAddress  l.43  obligatoire
+#   query          l.44  obligatoire
+#   threshold       l.46  obligatoire
+#   activationThreshold l.47  optionnel
+#   awsRegion      l.52  optionnel
+#   ignoreNullValues l.50 porte `default=true`
+# Aucune clé n'est inventée, et aucune n'est reprise d'une documentation.
+#
+# ═══ L'ARITHMÉTIQUE DU SEUIL, QUI DÉTERMINE LA CHARGE À ENVOYER ══════════════
+# KEDA construit une métrique HPA de type AverageValue : le nombre de
+# répliques visé est `ceil(valeur_de_la_requête / threshold)`.
+# Avec `threshold: "2"` :
+#       4 en attente → 2 répliques
+#       6 en attente → 3 répliques
+#       8 en attente → 4 répliques  ← le plafond
+# Et comme chaque réplique ne sert que 4 requêtes simultanément
+# (`--max-num-seqs 4`), une charge de 40 requêtes concurrentes laisse ~36 en
+# attente dès la première réplique, ce qui demande le plafond tout de suite.
+# La charge du test doit donc être soutenue ASSEZ LONGTEMPS pour que les 4
+# répliques aient le temps de démarrer — plusieurs minutes, puisque chaque
+# nouvelle réplique télécharge image et poids.
+#
+# ═══ POURQUOI `sum(...)` ET PAS LA MÉTRIQUE BRUTE ════════════════════════════
+# `vllm:num_requests_waiting` est étiquetée par `model_name` et `engine`
+# (`loggers.py:168`), et le scrape ajoute `pod`, `namespace`, etc. Sans
+# agrégation, la requête rendrait PLUSIEURS séries et KEDA refuserait le
+# résultat. `sum(...)` rend une valeur unique : la file totale, qui est bien la
+# grandeur à répartir entre les répliques.
+#
+# ═══ DESCENTE ════════════════════════════════════════════════════════════════
+# La fenêtre de stabilisation par défaut de la HPA en descente est de 300 s.
+# Pour un test dont le budget total est inférieur à 30 minutes, cela mangerait
+# cinq minutes de simple attente. Elle est donc ramenée à 60 s, et la descente
+# est autorisée par paliers de 1 réplique toutes les 60 s — assez lent pour
+# être observable à l'écran, assez rapide pour tenir dans le budget.
+#
+# ⛔ CE SCALEDOBJECT EST INERTE TANT QUE L'IDENTITÉ AWS DE KEDA N'EXISTE PAS.
+#   Voir `30-triggerauthentication.yaml` : il n'y a aujourd'hui aucune pod
+#   identity association dans le namespace `keda`. Sans elle, la requête vers
+#   AMP n'est pas signée, AMP rend 403, et aucune mise à l'échelle n'a lieu.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: vllm-mistral
+  namespace: vllm
+  labels:
+    managed-by: peeks
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vllm-mistral
+  minReplicaCount: 1
+  maxReplicaCount: 4
+  # 15 s : assez court pour que la réaction soit visible, mais ce n'est PAS le
+  # facteur limitant. La chaîne complète est
+  #   vLLM /metrics → intervalle de scrape du collecteur → AMP
+  #                 → pollingInterval → HPA → pod → Karpenter → nœud
+  # et le scrape du collecteur domine ce premier tronçon. C'est l'un des temps
+  # que le test doit chiffrer.
+  pollingInterval: 15
+  cooldownPeriod: 120
+  advanced:
+    # On NE restaure PAS le nombre de répliques d'origine à la suppression :
+    # pendant le test, une suppression accidentelle du ScaledObject ne doit pas
+    # provoquer en plus un mouvement de répliques non voulu.
+    restoreToOriginalReplicaCount: false
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 60
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+  triggers:
+    - type: prometheus
+      metricType: AverageValue
+      authenticationRef:
+        name: amp-sigv4
+      metadata:
+        # Point d'entrée de requête de l'espace AMP. C'est la même URL que
+        # celle que la source de données Grafana interroge avec succès depuis
+        # le commit 76b9df0 — donc une adresse vérifiée, pas supposée.
+        serverAddress: https://aps-workspaces.eu-west-3.amazonaws.com/workspaces/ws-294f5b5c-de0f-497b-ab57-d13f3fb2736d
+        query: sum(vllm:num_requests_waiting)
+        threshold: "2"
+        # En dessous de 1 en attente, le trigger est INACTIF. Cela évite que du
+        # bruit à 0 maintienne des répliques inutiles, et laisse le plancher
+        # redescendre proprement à 1 à la fin du test.
+        activationThreshold: "1"
+        awsRegion: eu-west-3
+        # Explicite, bien que ce soit le défaut (`default=true`, l.50) : tant
+        # qu'aucune réplique n'a servi de requête, la série n'existe pas et AMP
+        # rend un résultat vide. Sans cette tolérance, KEDA traiterait ce vide
+        # comme une ERREUR au lieu d'un zéro, et le ScaledObject tomberait en
+        # échec au tout début du test — précisément au moment le plus visible.
+        ignoreNullValues: "true"

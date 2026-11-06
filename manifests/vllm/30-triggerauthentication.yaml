@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TriggerAuthentication — comment KEDA s'authentifie auprès d'AMP.
+#
+# ═══ POURQUOI C'EST INDISPENSABLE ════════════════════════════════════════════
+# L'espace Amazon Managed Prometheus n'accepte que des requêtes SIGNÉES en
+# SigV4. Une requête non signée rend `HTTP 403 {"message":"Missing
+# Authentication Token"}` — c'est exactement l'erreur qu'a rendue Grafana
+# avant qu'on lui donne un rôle, et la leçon vaut ici.
+#
+# ═══ CE QUI EST VÉRIFIÉ ══════════════════════════════════════════════════════
+# Le scaler prometheus de KEDA 2.19.0 SAIT signer en SigV4. Lu dans
+# `pkg/scalers/prometheus_scaler.go` au tag v2.19.0 (3f88d60a) :
+#   · ligne 52  `AwsRegion     keda:"name=awsRegion, order=triggerMetadata;authParams, optional"`
+#   · ligne 54  `IdentityOwner keda:"name=identityOwner, ..."`
+#   · ligne 129 `awsTransport, err := aws.NewSigV4RoundTripper(config, meta.AwsRegion)`
+# Ce n'est donc pas une hypothèse sur une fonctionnalité : le code est là.
+#
+# ═══ CE QUI MANQUE ENCORE ════════════════════════════════════════════════════
+# ⛔ `aws eks list-pod-identity-associations` rend ZÉRO association dans le
+#    namespace `keda`. En l'état, ce TriggerAuthentication ne résoudra aucune
+#    identité et le ScaledObject restera INERTE : il ne lira rien, donc il ne
+#    déclenchera jamais.
+#
+# Il faut, et ce n'est pas encore autorisé :
+#   1. un rôle IAM dont la politique de confiance accepte
+#      `pods.eks.amazonaws.com` avec `sts:AssumeRole` + `sts:TagSession`,
+#      exactement la forme du rôle Grafana déjà créé ;
+#   2. une politique en ligne limitée à la LECTURE et au SEUL espace de
+#      travail : `aps:QueryMetrics`, `aps:GetSeries`, `aps:GetLabels`,
+#      `aps:GetMetricMetadata` ;
+#   3. une pod identity association sur le ServiceAccount de l'opérateur KEDA
+#      dans le namespace `keda`.
+#
+# Le ServiceAccount à associer est celui de l'OPÉRATEUR, pas celui du
+# metrics-apiserver : c'est l'opérateur qui exécute les scalers.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: amp-sigv4
+  namespace: vllm
+  labels:
+    managed-by: peeks
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  # `aws` et non `aws-eks` : `aws` est le provider qui s'appuie sur la chaîne
+  # de credentials du pod, qu'une pod identity association alimente.
+  podIdentity:
+    provider: aws

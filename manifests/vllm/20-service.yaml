@@ -1,0 +1,30 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Service d'accès au serveur OpenAI de vLLM.
+#
+# ClusterIP, délibérément. Rien de ce service n'est joignable hors du cluster :
+# ni LoadBalancer, ni NodePort, ni Ingress. L'injection de charge du test se
+# fera par un pod DANS le cluster, ou par `kubectl port-forward` depuis le
+# poste de l'opérateur — aucune des deux ne crée d'exposition réseau.
+#
+# Le port 8000 n'est pas un choix : c'est le défaut du serveur OpenAI de vLLM,
+# lu dans `vllm/entrypoints/openai/cli_args.py:75` (`port: int = 8000`).
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-mistral
+  namespace: vllm
+  labels:
+    app.kubernetes.io/name: vllm-mistral
+    managed-by: peeks
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vllm-mistral
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
