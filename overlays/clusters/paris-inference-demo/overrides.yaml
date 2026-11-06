@@ -618,7 +618,7 @@ grafana-paris:
                   },
                   "options": {
                     "mode": "markdown",
-                    "content": "**Source des noms** : `vllm/v1/metrics/loggers.py`, tag upstream `v0.10.2` (`01efc7ef`), qui est la version installee par `Dockerfile.ray-vllm` (`vllm[runai]==0.10.2`). Labels : `model_name`, `engine`.\n\n> ### ⚠️ AUCUNE DE CES SERIES N ARRIVE DANS AMP AUJOURD HUI\n> Verifie le 2026-11-06 : `vllm:*` rend **0 nom** dans AMP.\n> La cause n est pas l absence de charge, c est l absence de chemin de collecte :\n> - les pods `ray-service` ne portent **aucune** annotation `prometheus.io/scrape`, donc le job `kubernetes-pods` les ignore ;\n> - vLLM expose `/metrics` sur le port **8000**, et le seul job par port, `polyglot_app_config`, ne garde que `:8080`.\n\n> **A trancher avant le 17/11** : annoter les pods ray (`prometheus.io/scrape: \"true\"`, `prometheus.io/port: \"8000\"`) ou ajouter un job. Les deux touchent appmod, donc hors de ce commit.\n\n**A confirmer le 10/11** — ces 3 noms etaient attendus mais sont **absents** du code en 0.10.2 :\n`vllm:prompt_tokens_cached` · `vllm:request_time_per_output_token_seconds` · `vllm:num_requests_waiting_by_reason`\n\n**Noms deprecies en 0.10.2, deliberement NON utilises ici** : `vllm:gpu_cache_usage_perc` (-> `kv_cache_usage_perc`), `vllm:gpu_prefix_cache_hits` (-> `prefix_cache_hits`), `vllm:gpu_prefix_cache_queries` (-> `prefix_cache_queries`), `vllm:time_per_output_token_seconds` (-> `inter_token_latency_seconds`)."
+                    "content": "**Source des noms** : `vllm/v1/metrics/loggers.py`, tag upstream `v0.10.2` (`01efc7ef`), qui est la version installee par `Dockerfile.ray-vllm` (`vllm[runai]==0.10.2`). Labels : `model_name`, `engine`.\n\n> ### ⚠️ AUCUNE DE CES SERIES N ARRIVE DANS AMP AUJOURD HUI\n> Verifie le 2026-11-06 : `vllm:*` rend **0 nom** dans AMP.\n> La cause n est pas l absence de charge, c est l absence de chemin de collecte :\n> - les pods `ray-service` ne portent **aucune** annotation `prometheus.io/scrape`, donc le job `kubernetes-pods` les ignore ;\n> - vLLM expose `/metrics` sur le port **8000**, et le seul job par port, `polyglot_app_config`, ne garde que `:8080`.\n\n> **A trancher avant le 17/11** : annoter les pods ray (`prometheus.io/scrape: \"true\"`, `prometheus.io/port: \"8000\"`) ou ajouter un job. Les deux touchent appmod, donc hors de ce commit.\n\n**A confirmer le 10/11** — ces 3 noms etaient attendus mais sont **absents** du code en 0.10.2 :\n`vllm:prompt_tokens_cached` · `vllm:request_time_per_output_token_seconds` · `vllm:num_requests_waiting_by_reason`\n\n**Noms deprecies en 0.10.2, deliberement NON utilises ici** : `vllm:gpu_cache_usage_perc` (-> `kv_cache_usage_perc`), `vllm:gpu_prefix_cache_hits` (-> `prefix_cache_hits_total`), `vllm:gpu_prefix_cache_queries` (-> `prefix_cache_queries_total`), `vllm:time_per_output_token_seconds` (-> `inter_token_latency_seconds`).\n\n> ### ⚠️ LE SUFFIXE `_total` DES COMPTEURS\n> Le code enregistre un compteur sous `vllm:prompt_tokens`, mais le client Prometheus **Python** l'expose sous `vllm:prompt_tokens_total` — plus une serie `_created`. Lire les noms dans le code ne suffisait donc pas : 5 de ces panneaux n'affichaient rien, et le defaut n'a ete vu qu'en confrontant les noms a ceux REELLEMENT presents dans AMP, service demarre.\n> Les compteurs employes ici portent donc tous `_total` : `generation_tokens_total`, `prompt_tokens_total`, `num_preemptions_total`, `prefix_cache_hits_total`, `prefix_cache_queries_total`.\n> A noter que KEDA et DCGM n'ont PAS ce probleme : ecrits en Go, leur client n'ajoute aucun suffixe, et leurs noms de code sont ceux exposes — verifie sur les deux endpoints."
                   }
                 },
                 {
@@ -748,7 +748,7 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "sum(rate(vllm:generation_tokens[5m]))",
+                      "expr": "sum(rate(vllm:generation_tokens_total[5m]))",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "tok/s",
@@ -787,7 +787,7 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "sum(rate(vllm:prefix_cache_hits[15m])) / clamp_min(sum(rate(vllm:prefix_cache_queries[15m])), 1)",
+                      "expr": "sum(rate(vllm:prefix_cache_hits_total[15m])) / clamp_min(sum(rate(vllm:prefix_cache_queries_total[15m])), 1)",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "hit ratio",
@@ -827,7 +827,7 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "sum(rate(vllm:num_preemptions[15m]))",
+                      "expr": "sum(rate(vllm:num_preemptions_total[15m]))",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "preempt/s",
@@ -1132,13 +1132,13 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "sum(rate(vllm:prompt_tokens[5m]))",
+                      "expr": "sum(rate(vllm:prompt_tokens_total[5m]))",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "prompt/s"
                     },
                     {
-                      "expr": "sum(rate(vllm:generation_tokens[5m]))",
+                      "expr": "sum(rate(vllm:generation_tokens_total[5m]))",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "generation/s"
