@@ -545,6 +545,32 @@ grafana-paris:
     #   `prometheus.io/scrape: "true"` et `prometheus.io/port: "9400"`, que le
     #   job `kubernetes-service-endpoints` garde.
     #
+    # ─── ⛔ AUCUNE ACCOLADE DOUBLE DANS CE JSON ──────────────────────────
+    # CONTRAINTE DURE, decouverte en production sur le commit a2355df, qui a
+    # echoue a atterrir pour cette seule raison.
+    #
+    # L'ApplicationSet `grafana-paris` qui genere cette Application tourne en
+    # `goTemplate: true` avec `goTemplateOptions: ["missingkey=error"]`. Le
+    # controleur applique donc une substitution Go template sur TOUTES les
+    # chaines du spec genere -- le JSON de ces tableaux compris.
+    #
+    # La syntaxe de legende de Grafana, `{{label}}`, est lue par Go comme un
+    # appel a une fonction `label` qui n'existe pas. Le controleur echoue sur
+    #   failed to deeply replace JSON field contents: failed to parse template
+    # et -- c'est le piege -- l'Application n'est PAS mise a jour : elle reste
+    # figee sur la revision precedente, `Synced/Healthy`, sans que rien ne
+    # paraisse casse. Seul le statut de l'ApplicationSet le dit.
+    #
+    # 18 occurrences (`{{gpu}}`, `{{Hostname}}`, `{{scaledObject}}`...) ont
+    # bloque a2355df. Les legendes sont donc desormais soit STATIQUES, soit
+    # ABSENTES -- sans legende, Grafana rend le nom de serie complet avec tous
+    # ses labels, ce qui donne la meme information sans accolades.
+    #
+    # Le generateur /tmp/gen-dashboards.py REFUSE maintenant toute legende
+    # contenant des accolades, a la generation. Si un panneau doit afficher un
+    # label, en faire un panneau `table` en requete instantanee : chaque label
+    # devient une colonne (c'est ce que fait le panneau de version KEDA).
+    #
     # ─── PAS DE `datasource` DANS LES PANNEAUX ───────────────────────────
     # Aucun panneau ne fige d'uid. La source AMP est `isDefault: true`
     # (vérifié ci-dessus dans ce même fichier), donc Grafana la résout à la
@@ -609,9 +635,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(vllm:num_requests_running)",
-                      "legendFormat": "running",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "running",
                       "instant": true,
                       "range": false
                     }
@@ -646,9 +672,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(vllm:num_requests_waiting)",
-                      "legendFormat": "waiting",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "waiting",
                       "instant": true,
                       "range": false
                     }
@@ -683,9 +709,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "max(vllm:kv_cache_usage_perc)",
-                      "legendFormat": "kv cache",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "kv cache",
                       "instant": true,
                       "range": false
                     }
@@ -723,9 +749,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(rate(vllm:generation_tokens[5m]))",
-                      "legendFormat": "tok/s",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "tok/s",
                       "instant": true,
                       "range": false
                     }
@@ -762,9 +788,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(rate(vllm:prefix_cache_hits[15m])) / clamp_min(sum(rate(vllm:prefix_cache_queries[15m])), 1)",
-                      "legendFormat": "hit ratio",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "hit ratio",
                       "instant": true,
                       "range": false
                     }
@@ -802,9 +828,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(rate(vllm:num_preemptions[15m]))",
-                      "legendFormat": "preempt/s",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "preempt/s",
                       "instant": true,
                       "range": false
                     }
@@ -839,15 +865,15 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(vllm:num_requests_running)",
-                      "legendFormat": "en cours",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "en cours"
                     },
                     {
                       "expr": "sum(vllm:num_requests_waiting)",
-                      "legendFormat": "en attente",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "en attente"
                     }
                   ],
                   "fieldConfig": {
@@ -875,7 +901,7 @@ grafana-paris:
                   "id": 9,
                   "type": "timeseries",
                   "title": "Occupation du KV cache",
-                  "description": "loggers.py:245",
+                  "description": "loggers.py:245 — une seule requete, sans legende : Grafana rend le nom de serie complet, donc model_name et engine apparaissent d eux-memes.",
                   "gridPos": {
                     "x": 12,
                     "y": 13,
@@ -885,7 +911,6 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "vllm:kv_cache_usage_perc",
-                      "legendFormat": "{{model_name}} / engine {{engine}}",
                       "refId": "A",
                       "editorMode": "code"
                     }
@@ -926,21 +951,21 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
-                      "legendFormat": "p50",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "p50"
                     },
                     {
                       "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
-                      "legendFormat": "p95",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "p95"
                     },
                     {
                       "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
-                      "legendFormat": "p99",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "p99"
                     }
                   ],
                   "fieldConfig": {
@@ -979,15 +1004,15 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket[5m])))",
-                      "legendFormat": "p50",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "p50"
                     },
                     {
                       "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket[5m])))",
-                      "legendFormat": "p95",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "p95"
                     }
                   ],
                   "fieldConfig": {
@@ -1026,9 +1051,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket[5m])))",
-                      "legendFormat": "p95 e2e",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "p95 e2e"
                     }
                   ],
                   "fieldConfig": {
@@ -1067,9 +1092,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:request_queue_time_seconds_bucket[5m])))",
-                      "legendFormat": "p95 file",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "p95 file"
                     }
                   ],
                   "fieldConfig": {
@@ -1108,15 +1133,15 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(rate(vllm:prompt_tokens[5m]))",
-                      "legendFormat": "prompt/s",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "prompt/s"
                     },
                     {
                       "expr": "sum(rate(vllm:generation_tokens[5m]))",
-                      "legendFormat": "generation/s",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "generation/s"
                     }
                   ],
                   "fieldConfig": {
@@ -1196,9 +1221,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "count(DCGM_FI_DEV_GPU_UTIL > 0)",
-                      "legendFormat": "actifs",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "actifs",
                       "instant": true,
                       "range": false
                     }
@@ -1233,9 +1258,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "max(DCGM_FI_DEV_GPU_UTIL)",
-                      "legendFormat": "util",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "util",
                       "instant": true,
                       "range": false
                     }
@@ -1273,9 +1298,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "max(DCGM_FI_DEV_GPU_TEMP)",
-                      "legendFormat": "temp",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "temp",
                       "instant": true,
                       "range": false
                     }
@@ -1312,9 +1337,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(DCGM_FI_DEV_POWER_USAGE)",
-                      "legendFormat": "watts",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "watts",
                       "instant": true,
                       "range": false
                     }
@@ -1351,9 +1376,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(DCGM_FI_DEV_FB_USED) / clamp_min(sum(DCGM_FI_DEV_FB_USED) + sum(DCGM_FI_DEV_FB_FREE), 1)",
-                      "legendFormat": "FB",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "FB",
                       "instant": true,
                       "range": false
                     }
@@ -1391,9 +1416,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(DCGM_FI_DEV_XID_ERRORS)",
-                      "legendFormat": "XID",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "XID",
                       "instant": true,
                       "range": false
                     }
@@ -1418,7 +1443,7 @@ grafana-paris:
                   "id": 8,
                   "type": "timeseries",
                   "title": "Occupation GPU, par GPU",
-                  "description": "config-map:23",
+                  "description": "config-map:23 — sans legende, donc Hostname et gpu apparaissent dans le nom de serie.",
                   "gridPos": {
                     "x": 0,
                     "y": 13,
@@ -1428,7 +1453,6 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "DCGM_FI_DEV_GPU_UTIL",
-                      "legendFormat": "{{Hostname}} gpu {{gpu}}",
                       "refId": "A",
                       "editorMode": "code"
                     }
@@ -1469,15 +1493,15 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE",
-                      "legendFormat": "tensor {{Hostname}} gpu {{gpu}}",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "tensor"
                     },
                     {
                       "expr": "DCGM_FI_PROF_GR_ENGINE_ACTIVE",
-                      "legendFormat": "gr engine {{Hostname}} gpu {{gpu}}",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "moteur graphique"
                     }
                   ],
                   "fieldConfig": {
@@ -1516,15 +1540,15 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "DCGM_FI_DEV_FB_USED",
-                      "legendFormat": "utilise {{Hostname}} gpu {{gpu}}",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "utilise"
                     },
                     {
                       "expr": "DCGM_FI_DEV_FB_FREE",
-                      "legendFormat": "libre {{Hostname}} gpu {{gpu}}",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "libre"
                     }
                   ],
                   "fieldConfig": {
@@ -1553,7 +1577,7 @@ grafana-paris:
                   "id": 11,
                   "type": "timeseries",
                   "title": "Temperature et puissance",
-                  "description": "config-map:11, 10 et 14",
+                  "description": "config-map:11, 10 et 14 — trois unites melangees, d ou les legendes explicites et l absence d unite d axe.",
                   "gridPos": {
                     "x": 12,
                     "y": 21,
@@ -1563,21 +1587,21 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "DCGM_FI_DEV_GPU_TEMP",
-                      "legendFormat": "GPU {{Hostname}} gpu {{gpu}}",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "temperature GPU (C)"
                     },
                     {
                       "expr": "DCGM_FI_DEV_MEMORY_TEMP",
-                      "legendFormat": "memoire {{Hostname}} gpu {{gpu}}",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "temperature memoire (C)"
                     },
                     {
                       "expr": "DCGM_FI_DEV_POWER_USAGE",
-                      "legendFormat": "watts {{Hostname}} gpu {{gpu}}",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "puissance (W)"
                     }
                   ],
                   "fieldConfig": {
@@ -1605,7 +1629,7 @@ grafana-paris:
                   "id": 12,
                   "type": "timeseries",
                   "title": "Bande passante PCIe",
-                  "description": "config-map:82 et 81 — definis en gauge aux lignes 81-82 ; les lignes 31-32, en counter, sont commentees",
+                  "description": "config-map:82 et 81 — definis en gauge aux lignes 81-82 ; les lignes 31-32, en counter, sont commentees. Legendes statiques : rate() efface __name__, donc sans elles les deux series seraient indiscernables.",
                   "gridPos": {
                     "x": 0,
                     "y": 29,
@@ -1615,15 +1639,15 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "rate(DCGM_FI_PROF_PCIE_RX_BYTES[5m])",
-                      "legendFormat": "RX {{gpu}}",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "RX"
                     },
                     {
                       "expr": "rate(DCGM_FI_PROF_PCIE_TX_BYTES[5m])",
-                      "legendFormat": "TX {{gpu}}",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "TX"
                     }
                   ],
                   "fieldConfig": {
@@ -1662,15 +1686,15 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "DCGM_FI_DEV_SM_CLOCK",
-                      "legendFormat": "SM {{gpu}}",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "SM"
                     },
                     {
                       "expr": "DCGM_FI_DEV_MEM_CLOCK",
-                      "legendFormat": "memoire {{gpu}}",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "memoire"
                     }
                   ],
                   "fieldConfig": {
@@ -1709,9 +1733,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(rate(DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION[5m]))",
-                      "legendFormat": "mJ/s",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "mJ/s"
                     }
                   ],
                   "fieldConfig": {
@@ -1779,9 +1803,9 @@ grafana-paris:
                 },
                 {
                   "id": 2,
-                  "type": "stat",
+                  "type": "table",
                   "title": "KEDA — version en service",
-                  "description": "prommetrics.go:37 — LE SEUL nom deja confirme vivant, sur l endpoint et dans AMP",
+                  "description": "prommetrics.go:37 — LE SEUL nom deja confirme vivant, sur l endpoint 8080 et dans AMP. Metrique d info : sa valeur vaut toujours 1, l information est dans ses labels, rendus ici en colonnes.",
                   "gridPos": {
                     "x": 0,
                     "y": 10,
@@ -1791,11 +1815,11 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "keda_build_info",
-                      "legendFormat": "{{version}}",
                       "refId": "A",
                       "editorMode": "code",
                       "instant": true,
-                      "range": false
+                      "range": false,
+                      "format": "table"
                     }
                   ],
                   "fieldConfig": {
@@ -1803,16 +1827,19 @@ grafana-paris:
                     "overrides": []
                   },
                   "options": {
-                    "colorMode": "value",
-                    "graphMode": "area",
-                    "reduceOptions": {
-                      "calcs": [
-                        "lastNotNull"
-                      ],
-                      "fields": "",
-                      "values": false
+                    "showHeader": true
+                  },
+                  "transformations": [
+                    {
+                      "id": "organize",
+                      "options": {
+                        "excludeByName": {
+                          "Time": true,
+                          "Value": true
+                        }
+                      }
                     }
-                  }
+                  ]
                 },
                 {
                   "id": 3,
@@ -1828,9 +1855,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(keda_scaler_active)",
-                      "legendFormat": "actifs",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "actifs",
                       "instant": true,
                       "range": false
                     }
@@ -1865,9 +1892,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(keda_resource_registered_total)",
-                      "legendFormat": "objets",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "objets",
                       "instant": true,
                       "range": false
                     }
@@ -1902,9 +1929,9 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(increase(keda_scaler_detail_errors_total[15m]))",
-                      "legendFormat": "erreurs",
                       "refId": "A",
                       "editorMode": "code",
+                      "legendFormat": "erreurs",
                       "instant": true,
                       "range": false
                     }
@@ -1929,7 +1956,7 @@ grafana-paris:
                   "id": 6,
                   "type": "timeseries",
                   "title": "Valeur lue par chaque scaler",
-                  "description": "prommetrics.go:45 — c est la valeur que la HPA compare a sa cible. Pour la demo, elle doit suivre vllm:num_requests_waiting. A confirmer le 10/11.",
+                  "description": "prommetrics.go:45 — c est la valeur que la HPA compare a sa cible. Pour la demo, elle doit suivre vllm:num_requests_waiting. Sans legende, le nom de serie porte scaledObject, scaler et metric. A confirmer le 10/11.",
                   "gridPos": {
                     "x": 0,
                     "y": 14,
@@ -1939,7 +1966,6 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "keda_scaler_metrics_value",
-                      "legendFormat": "{{scaledObject}} / {{scaler}} / {{metric}}",
                       "refId": "A",
                       "editorMode": "code"
                     }
@@ -1979,7 +2005,6 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "keda_scaler_active",
-                      "legendFormat": "{{scaledObject}} / {{scaler}}",
                       "refId": "A",
                       "editorMode": "code"
                     }
@@ -2019,7 +2044,6 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "keda_scaler_metrics_latency_seconds",
-                      "legendFormat": "{{scaledObject}} / {{scaler}}",
                       "refId": "A",
                       "editorMode": "code"
                     }
@@ -2060,7 +2084,6 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "keda_internal_scale_loop_latency_seconds",
-                      "legendFormat": "{{type}} {{resource}}",
                       "refId": "A",
                       "editorMode": "code"
                     }
@@ -2101,21 +2124,21 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(rate(keda_scaled_object_errors_total[5m]))",
-                      "legendFormat": "ScaledObject",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "ScaledObject"
                     },
                     {
                       "expr": "sum(rate(keda_scaled_job_errors_total[5m]))",
-                      "legendFormat": "ScaledJob",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "ScaledJob"
                     },
                     {
                       "expr": "sum(rate(keda_scaler_detail_errors_total[5m]))",
-                      "legendFormat": "scaler",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "scaler"
                     }
                   ],
                   "fieldConfig": {
@@ -2153,15 +2176,15 @@ grafana-paris:
                   "targets": [
                     {
                       "expr": "sum(keda_scaled_object_paused)",
-                      "legendFormat": "en pause",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "en pause"
                     },
                     {
                       "expr": "sum(keda_trigger_registered_total)",
-                      "legendFormat": "triggers",
                       "refId": "A",
-                      "editorMode": "code"
+                      "editorMode": "code",
+                      "legendFormat": "triggers"
                     }
                   ],
                   "fieldConfig": {
