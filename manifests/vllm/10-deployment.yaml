@@ -117,10 +117,38 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  # Exists, et non In : couvre floor, burst et sharded sans
-                  # énumérer les valeurs.
+                  # ═══════════════════════════════════════════════════════
+                  # `In [floor, burst]` ET NON `Exists`.
+                  #
+                  # `Exists` acceptait les TROIS tiers, y compris `sharded`.
+                  # C'est devenu un défaut le jour où le pool de débordement
+                  # est passé en spot SEUL, sans repli : si Karpenter ne
+                  # trouve pas de capacité spot pour le débordement, le pool
+                  # `sharded` devient sa SEULE façon de satisfaire le pod —
+                  # et il lancerait alors un `g6.12xlarge` en ON-DEMAND.
+                  #
+                  # Ce serait contraire à deux consignes à la fois : pas de
+                  # repli on-demand, et pas d'autres types d'instance. Et ce
+                  # serait coûteux pour rien : le `g6.12xlarge` porte 4 GPU
+                  # (vérifié par `describe-instance-types`, contre 1 pour le
+                  # `g6.2xlarge`), alors que le `podAntiAffinity` par
+                  # `hostname` n'y placerait qu'UNE réplique. On paierait
+                  # quatre GPU pour en utiliser un.
+                  #
+                  # Énumérer deux valeurs ne ramène PAS le piège du
+                  # `nodeSelector` : celui-ci teste l'égalité sur une seule
+                  # valeur, alors qu'`In` accepte un ensemble. Les deux
+                  # tiers voulus restent donc couverts.
+                  #
+                  # Si le tier `sharded` devait un jour servir, c'est ICI
+                  # qu'il faudrait l'ajouter — explicitement, et non par
+                  # l'effet de bord d'un `Exists`.
+                  # ═══════════════════════════════════════════════════════
                   - key: inference-tier
-                    operator: Exists
+                    operator: In
+                    values:
+                      - floor
+                      - burst
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             - labelSelector:
