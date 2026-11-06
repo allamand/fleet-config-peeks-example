@@ -2662,9 +2662,50 @@ platform-manifests-bootstrap:
                   # rester en 3b (g6 absent de 3a, et PEEKS n'a pas de 3c) :
                   # réutiliser la même NodeClass est le plus simple et le plus sûr.
                 requirements:
+                  # ═════════════════════════════════════════════════════════
+                  # DÉBORDEMENT : SPOT, AVEC REPLI ON-DEMAND.
+                  # Décidé le 2026-11-06. Ne concerne QUE ce pool ; celui de
+                  # la réservation reste en ["reserved", "on-demand"].
+                  #
+                  # ⚠️ L'ORDRE DE CETTE LISTE NE VEUT RIEN DIRE. `In` est un
+                  # opérateur d'ENSEMBLE : Karpenter n'y lit aucune
+                  # préférence. L'ordre est écrit « spot » d'abord pour que
+                  # le fichier dise l'intention, pas parce qu'il la produit.
+                  # Ce qui produit la préférence, c'est que Karpenter retient
+                  # l'offre la moins chère compatible — donc le spot quand il
+                  # est disponible, et l'on-demand sinon.
+                  # Conséquence : ce bloc est IDENTIQUE en comportement à
+                  # ["on-demand", "spot"], qui était la valeur précédente.
+                  # Aucun changement de comportement n'est introduit ici.
+                  #
+                  # ⚠️ ET LE REPLI VA PROBABLEMENT SERVIR. Score de placement
+                  # spot mesuré le 2026-11-06 par `get-spot-placement-scores`
+                  # pour g6.2xlarge en eu-west-3 :
+                  #     cible 1 unité  → 1
+                  #     cible 2 unités → 1
+                  #     cible 3 unités → 1
+                  #     par zone : euw3-az2 → 1, euw3-az3 → 1
+                  # soit le MINIMUM d'une échelle de 1 à 10. Témoins de
+                  # comparaison dans la même région et à la même cible :
+                  # m5.large → 3, c5.xlarge → 3. L'instrument discrimine donc
+                  # bien, et g6.2xlarge sort en dessous de types abondants.
+                  #
+                  # Un marché spot EXISTE pourtant : dernière cotation
+                  # publiée en eu-west-3b à 0,4224 USD/h (08:00Z le
+                  # 2026-11-06), et g6.2xlarge est offert en 3b et 3c. Mais un
+                  # prix publié n'est pas une capacité disponible : le score
+                  # dit que la satisfaction d'une demande est improbable.
+                  #
+                  # À ATTENDRE DONC PENDANT LE TEST : des nœuds de
+                  # débordement en `on-demand`, et non en `spot`. C'est
+                  # précisément le repli qui rend le test réalisable — sans
+                  # lui, il n'y aurait probablement aucun nœud de
+                  # débordement. Le capacity-type réel de chaque nœud est à
+                  # relever, et non à supposer.
+                  # ═════════════════════════════════════════════════════════
                   - key: "karpenter.sh/capacity-type"
                     operator: In
-                    values: ["on-demand", "spot"]
+                    values: ["spot", "on-demand"]
                   - key: "kubernetes.io/arch"
                     operator: In
                     values: ["amd64"]
