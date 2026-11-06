@@ -2663,47 +2663,60 @@ platform-manifests-bootstrap:
                   # réutiliser la même NodeClass est le plus simple et le plus sûr.
                 requirements:
                   # ═════════════════════════════════════════════════════════
-                  # DÉBORDEMENT : SPOT SEUL, SANS AUCUN REPLI ON-DEMAND.
-                  # Décidé le 2026-11-06, et cette décision remplace celle du
-                  # même jour qui autorisait le repli. Ne concerne QUE ce
-                  # pool ; celui de la réservation reste en
+                  # DÉBORDEMENT : SPOT, AVEC REPLI ON-DEMAND.
+                  # Décidé le 2026-11-07. Remplace la décision « spot seul »
+                  # du 2026-11-06, et rétablit la valeur de `e356570`. Ne
+                  # concerne QUE ce pool ; celui de la réservation reste en
                   # ["reserved", "on-demand"].
                   #
-                  # ⚠️ CE CHANGEMENT-CI, LUI, CHANGE BIEN LE COMPORTEMENT, et
-                  # c'est la différence avec le commit précédent : passer de
-                  # ["spot","on-demand"] à ["spot"] RETIRE une possibilité.
-                  # Karpenter n'a plus d'offre de secours sur ce pool : s'il
-                  # n'y a pas de capacité spot, il ne lance RIEN ici.
+                  # ⚠️ CE RETOUR EN ARRIÈRE N'EST PAS UN REVIREMENT : il est
+                  # fondé sur une MESURE, prise entre-temps, qui a transformé
+                  # une probabilité en fait.
                   #
-                  # ⚠️ ET L'ABSENCE DE CAPACITÉ EST L'ISSUE LA PLUS PROBABLE.
-                  # Score de placement spot mesuré le 2026-11-06 par
-                  # `get-spot-placement-scores`, pour g6.2xlarge en
-                  # eu-west-3 :
-                  #     cible 1 unité  → 1
-                  #     cible 2 unités → 1
-                  #     cible 3 unités → 1
-                  #     par zone : euw3-az2 → 1, euw3-az3 → 1
-                  # soit le MINIMUM d'une échelle de 1 à 10. Témoins de
-                  # comparaison dans la même région et à la même cible :
-                  # m5.large → 3, c5.xlarge → 3. L'instrument discrimine donc
-                  # bien, et g6.2xlarge sort en dessous de types abondants.
+                  # CE QUE LE TEST « SPOT SEUL » A MONTRÉ, le 2026-11-06 à
+                  # partir de 18:42:12Z :
+                  #   · KEDA a lu la file et demandé 4 répliques en 62 s —
+                  #     la chaîne de mise à l'échelle des POD fonctionne ;
+                  #   · Karpenter a nommé jusqu'à 3 NodeClaims de
+                  #     débordement, et AUCUN n'est devenu un nœud ;
+                  #   · EC2 a refusé 17 fois, de 18:42:36Z à 19:03:57Z :
+                  #       UnfulfillableCapacity: Unable to fulfill capacity
+                  #       due to your request configuration.
+                  #       (aws-operation-name=CreateFleet)
+                  #   · 3 pods sont restés Pending jusqu'à la coupure de la
+                  #     charge, et la démonstration n'aurait rien montré.
                   #
-                  # Un marché spot EXISTE pourtant : dernière cotation
-                  # publiée en eu-west-3b à 0,4224 USD/h (08:00Z le
-                  # 2026-11-06), et g6.2xlarge est offert en 3b et 3c. Mais un
-                  # prix publié n'est pas une capacité disponible.
+                  # Le score de placement spot l'annonçait : 1 sur une échelle
+                  # de 1 à 10, pour g6.2xlarge en eu-west-3, aux cibles 1, 2
+                  # et 3, dans les deux zones qui l'offrent. Témoins de
+                  # comparaison, même région et même cible : m5.large → 3,
+                  # c5.xlarge → 3 — l'instrument discrimine, et g6.2xlarge
+                  # sort en dessous de types abondants. Score confirmé sur
+                  # TROIS relevés : 15:27Z, 18:41Z, et une reprise avant le
+                  # test.
                   #
-                  # CONSÉQUENCE ASSUMÉE, et c'est le sens de la décision : le
-                  # test peut très bien ne produire AUCUN nœud de
-                  # débordement. Dans ce cas la consigne est de NE PAS
-                  # réintroduire l'on-demand et de NE PAS élargir les types
-                  # d'instance : on consigne l'erreur exacte et son heure, on
-                  # redescend à 1 réplique, et on rapporte. Le capacity-type
-                  # réel de chaque nœud est à relever, et non à supposer.
+                  # Un marché spot EXISTE pourtant — cotations publiées en
+                  # eu-west-3b à 0,4224 USD/h (08:00Z) puis 0,4202 (15:00Z),
+                  # et le type est offert en 3b et 3c. Mais un prix publié
+                  # n'est pas une capacité disponible, et c'est exactement ce
+                  # que le test a établi.
+                  #
+                  # CE QUE LE REPLI CHANGE : Karpenter retient toujours
+                  # l'offre la moins chère compatible, donc il essaiera le
+                  # spot d'abord et retombera sur l'on-demand quand le spot
+                  # est refusé. L'ordre de cette liste n'y est pour rien —
+                  # `In` est un opérateur d'ENSEMBLE, sans préférence. Ce
+                  # bloc est donc identique en comportement à
+                  # ["on-demand", "spot"].
+                  #
+                  # À RELEVER PENDANT LE TEST, et non à supposer : le
+                  # capacity-type RÉEL de chaque nœud obtenu. C'est la seule
+                  # façon de savoir si le spot a fini par se matérialiser ou
+                  # si tout est venu de l'on-demand.
                   # ═════════════════════════════════════════════════════════
                   - key: "karpenter.sh/capacity-type"
                     operator: In
-                    values: ["spot"]
+                    values: ["spot", "on-demand"]
                   - key: "kubernetes.io/arch"
                     operator: In
                     values: ["amd64"]
