@@ -461,7 +461,7 @@ grafana-paris:
       #   aws eks create-pod-identity-association --region eu-west-3 \
       #     --cluster-name paris-inference-demo \
       #     --namespace grafana-paris --service-account grafana-paris \
-      #     --role-arn arn:aws:iam::382076407153:role/paris-demo-grafana-amp-reader
+      #     --role-arn arn:aws:iam::<compte>:role/paris-demo-grafana-amp-reader
       # Sans elle, la source de données répond 403 et aucun panneau ne s'affiche.
 
     # 🎯 ÉPINGLAGE — `managed-by: peeks` ajouté le 2026-11-05, même raison que
