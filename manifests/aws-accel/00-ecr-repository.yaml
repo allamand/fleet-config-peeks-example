@@ -51,7 +51,45 @@ metadata:
     argocd.argoproj.io/sync-wave: "-2"
 spec:
   name: peeks/vllm-openai
-  imageTagMutability: IMMUTABLE
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🩹 IMMUTABLE -> MUTABLE, LE 2026-11-07, SUR UN ÉCHEC MESURÉ
+  #
+  # J'avais écrit IMMUTABLE en le justifiant comme la garantie du « même
+  # digest ». C'ÉTAIT UNE ERREUR, et elle a cassé la copie.
+  #
+  # CE QUI S'EST PASSÉ, relevé et non supposé. L'image source est une LISTE
+  # de manifestes à deux plateformes :
+  #   linux/arm64  sha256:447307d0…
+  #   linux/amd64  sha256:df2607b2…
+  #   liste        sha256:607442e4…   ← le digest à préserver
+  # `docker buildx imagetools create` pousse les enfants un par un, chacun par
+  # un PUT sur le même tag. Le premier PUT (arm64) a RÉUSSI et a scellé le tag
+  # immuable ; le second a été refusé :
+  #   ERROR: failed commit on ref "manifest-sha256:df2607b2…":
+  #   unexpected status from PUT … /manifests/v0.10.2: 400 Bad Request
+  # Résultat : le dépôt portait le tag `v0.10.2` pointant sur l'image ARM64,
+  # inutilisable par nos nœuds amd64, et impossible à corriger puisque le tag
+  # était immuable.
+  #
+  # POURQUOI MUTABLE PLUTÔT QUE DE SUPPRIMER L'IMAGE : supprimer une image
+  # dans ECR est une suppression AWS, explicitement hors de ce qui est
+  # autorisé ici. Passer le dépôt en MUTABLE laisse le PUT de la liste
+  # remplacer le tag, sans rien supprimer. Le manifeste arm64 orphelin reste
+  # dans le dépôt, sans tag — inoffensif, et couvert par `retain`.
+  #
+  # ET LA GARANTIE EST DÉPLACÉE, PAS PERDUE — elle est même plus forte. Le
+  # Deployment épingle désormais l'image PAR DIGEST
+  # (`…/peeks/vllm-openai@sha256:607442e4…`) et non par tag. Un digest est le
+  # contenu : aucune mutation de tag ne peut changer ce que le pod exécute.
+  # L'immuabilité de tag ne protégeait qu'un alias ; le digest protège les
+  # octets.
+  #
+  # NON RETENU : `IMMUTABLE_WITH_EXCLUSION` avec un filtre sur ce tag
+  # existe bien dans le CRD (`imageTagMutabilityExclusionFilters`), mais sa
+  # prise en charge par cette version du contrôleur ACK n'est pas vérifiée, et
+  # je ne pose pas un réglage non éprouvé à dix jours de la démonstration.
+  # ═══════════════════════════════════════════════════════════════════════════
+  imageTagMutability: MUTABLE
   imageScanningConfiguration:
     scanOnPush: true
   encryptionConfiguration:
