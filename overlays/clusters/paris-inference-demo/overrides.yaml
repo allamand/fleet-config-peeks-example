@@ -2393,19 +2393,55 @@ dcgm-exporter:
     # REMPLAÇAIT pas le bloc du chart, il n'en écrasait que la clé `memory` —
     # d'où le `cpu: 200m` vivant, qui ne vient pas d'ici.
     #
-    # POURQUOI 512Mi ET PAS UN CHIFFRE PLUS CONFORTABLE. C'est la valeur du
-    # fournisseur pour CE chart et CETTE version, déjà exercée sur du GPU AWS
-    # par ai-on-eks qui épingle le même 4.8.1. Inventer 1Gi « pour être
-    # tranquille » referait exactement la faute qu'on corrige : poser un
-    # plafond non mesuré. La consommation réelle est relevée après atterrissage ;
-    # si elle approche ce plafond, c'est la mesure qui justifiera de le lever.
+    # PREMIÈRE ÉTAPE, le 2026-11-06 : retour au défaut du fournisseur, 512Mi.
+    # Le raisonnement tenait alors : ne pas inventer un chiffre, reprendre
+    # celui que NVIDIA livre pour ce chart et cette version, déjà exercé sur du
+    # GPU AWS par ai-on-eks qui épingle le même 4.8.1. Et la promesse écrite
+    # ici était que la consommation serait relevée après atterrissage, la
+    # mesure devant seule justifier de lever le plafond.
     #
-    # `requests` reste à 128Mi : c'est aussi le défaut du chart, et une requête
-    # basse est correcte pour un DaemonSet d'observation.
+    # ═══════════════════════════════════════════════════════════════════════
+    # 🩹 SECONDE ÉTAPE, LE MÊME JOUR : 512Mi -> 768Mi, SUR CETTE MESURE
+    #
+    # 512Mi a FONCTIONNÉ — pod Ready, 0 redémarrage, 0 OOMKilled, et les 23
+    # séries `DCGM_FI_*` enfin présentes dans AMP. Ce n'est donc pas un
+    # correctif d'incident, c'est la marge que la mesure réclame.
+    #
+    # CE QUE LE RELEVÉ A DONNÉ, sur le nœud GPU du plancher (g6.2xlarge, L4),
+    # 23 échantillons sur 11 min, un toutes les 30 s :
+    #   montée      397Mi -> 419Mi sur les 3 premières minutes
+    #   plateau     418-419Mi, tenu sans dérive jusqu'au dernier échantillon
+    #   plafond     512Mi   ->  82 % d'occupation, 93Mi de marge
+    #   redémarrages 0 sur toute la fenêtre
+    #
+    # C'EST UN PLATEAU, PAS UNE FUITE — la distinction est ce qui rend ce
+    # commit petit. Si la courbe avait continué de monter, le bon geste aurait
+    # été de chercher la cause, pas d'élargir le plafond.
+    #
+    # POURQUOI ÉLARGIR QUAND MÊME : 18 % de marge sur un exportateur qui a
+    # déjà été tué une fois pour cette raison exacte (106 redémarrages à
+    # 256Mi), à dix jours d'une démonstration où le tableau GPU est à l'écran.
+    # Le nœud porte 32 GiB ; 256Mi de plus ne se voient pas.
+    #
+    # POURQUOI 768Mi ET PAS 1Gi : 768Mi place le plateau mesuré à 55 %
+    # d'occupation, soit 349Mi de marge — 3,7 fois la marge actuelle, et déjà
+    # 1,8 fois la consommation observée. 1Gi ne répondrait à aucune mesure de
+    # plus, et le but reste de ne poser que des chiffres qu'on peut défendre.
+    #
+    # CE QU'IL FAUDRA REGARDER, et qui n'est pas mesuré ici : ce plateau a été
+    # relevé sur UN nœud à UN GPU, au repos côté calcul. Le relevé est à
+    # refaire sur un nœud de débordement sous charge, où DCGM échantillonne un
+    # GPU réellement occupé. Même structure, même nombre de GPU : la
+    # consommation ne devrait pas bouger — mais « ne devrait pas » n'est pas
+    # une mesure.
+    #
+    # `requests` reste à 128Mi, défaut du chart : une requête basse est
+    # correcte pour un DaemonSet d'observation, et la relever réserverait de la
+    # capacité sur chaque nœud GPU sans rien garantir de plus.
     # ═══════════════════════════════════════════════════════════════════════
     resources:
       requests: { cpu: 100m, memory: 128Mi }
-      limits:   { memory: 512Mi }
+      limits:   { memory: 768Mi }
 
 
 platform-manifests-bootstrap:
