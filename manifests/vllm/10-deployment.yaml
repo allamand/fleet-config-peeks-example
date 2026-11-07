@@ -160,6 +160,10 @@ spec:
           operator: Exists
           effect: NoSchedule
       terminationGracePeriodSeconds: 60
+      # Identité des pods d'inférence. Sans ce champ, les pods tournaient sous
+      # le `default` du namespace — voir 05-serviceaccount.yaml. C'est ce SA
+      # que l'association d'identité EKS lie au rôle de lecture S3.
+      serviceAccountName: vllm-s3-reader
       containers:
         - name: vllm
           image: vllm/vllm-openai:v0.10.2
@@ -167,8 +171,43 @@ spec:
           # Tous les drapeaux ci-dessous ont été vérifiés PRÉSENTS au tag
           # v0.10.2 (01efc7ef), avec leur fichier:ligne — aucun n'est supposé.
           args:
+            # ═══════════════════════════════════════════════════════════════
+            # 🩹 LES POIDS VIENNENT DE S3 EN RÉGION — 2026-11-07, piste 1
+            #
+            # AVANT : `--model mistralai/Mistral-7B-Instruct-v0.3`, donc un
+            # téléchargement depuis huggingface.co à CHAQUE démarrage de
+            # réplique. Mesuré le 06/11 : 250 s, soit 0,46 Gbps — 9 % de la
+            # bande passante de base d'une g6.2xlarge, et le trafic sortait
+            # par le NAT.
+            #
+            # LE SUPPORT EST VÉRIFIÉ, PAS SUPPOSÉ. Dans l'image v0.10.2 en
+            # service, la table de résolution des chargeurs donne
+            #   _LOAD_FORMAT_TO_MODEL_LOADER["runai_streamer"]
+            #       = RunaiModelStreamerLoader
+            # et les deux extras sont installés (`runai_model_streamer`,
+            # `runai_model_streamer_s3`). Contre-épreuve : une valeur bidon
+            # est REFUSÉE par `ValueError: Load format ... is not supported`.
+            # ⚠ Mon premier contrôle était faux — `LoadConfig(load_format=…)`
+            # accepte n'importe quoi, le champ étant typé `Union[str, Any]`.
+            #
+            # LE PRÉFIXE NE CONTIENT QUE LE FORMAT HF SHARDED. Le dépôt amont
+            # publie aussi `consolidated.safetensors` (format Mistral) ; il
+            # est volontairement ABSENT du bucket, sinon le chargeur pourrait
+            # le choisir.
+            #
+            # `--served-model-name` EST INCHANGÉ : les trois tableaux Grafana
+            # et le déclencheur KEDA filtrent sur ce nom. Le changer rendrait
+            # les panneaux muets.
+            # ═══════════════════════════════════════════════════════════════
             - --model
-            - mistralai/Mistral-7B-Instruct-v0.3   # arg_utils.py
+            - s3://peeks-paris-demo-models/mistral-7b-instruct-v0.3/
+            - --load-format
+            - runai_streamer
+            # concurrency = ceil(taille_Go / 4), recommandation AWS. Les poids
+            # HF sharded font 13,50 Gio -> 4. `distributed: true` ne
+            # s'applique qu'à TP > 1 et est donc volontairement absent.
+            - --model-loader-extra-config
+            - '{"concurrency":4}'
             - --served-model-name
             - mistral-7b                           # arg_utils.py:547
             - --host
@@ -191,9 +230,32 @@ spec:
             - name: HF_HOME
               value: /cache/huggingface
             # Pas de jeton : le modèle n'est pas gated. Aucune variable
-            # HF_TOKEN n'est posée, et aucun secret n'est monté.
+            # HF_TOKEN n'est posée, et aucun secret n'est monté. Conservé
+            # malgré le passage à S3 : vLLM peut encore écrire des artefacts
+            # de cache sous ce chemin.
             - name: VLLM_LOGGING_LEVEL
               value: INFO
+            # ─── Réglage du Run:ai Model Streamer, valeurs AWS ─────────────
+            # 4 GiB par bloc, et ce chiffre a une raison documentée : un
+            # worker par shard, et les requêtes byte-range sont SÉRIALISÉES
+            # à l'intérieur d'un worker. Des blocs plus petits n'ajoutent pas
+            # de parallélisme, ils ajoutent des aller-retours. De 256 MiB à
+            # 4 GiB les mesures AWS se tiennent à 5 % près ; 8 GiB RÉGRESSE
+            # de 56 % en dépassant la taille de shard.
+            - name: RUNAI_STREAMER_CHUNK_BYTESIZE
+              value: "4294967296"
+            - name: RUNAI_STREAMER_S3_REQUEST_TIMEOUT_MS
+              value: "3000"
+            - name: RUNAI_STREAMER_S3_LOW_SPEED_LIMIT
+              value: "1048576"
+            # La région est posée explicitement : le SDK la cherche sinon par
+            # IMDS, ce qui marche mais ajoute un aller-retour au démarrage —
+            # et une erreur de région se manifeste par un message sans
+            # rapport apparent.
+            - name: AWS_REGION
+              value: eu-west-3
+            - name: AWS_DEFAULT_REGION
+              value: eu-west-3
           resources:
             limits:
               # Ressource étendue, fournie par le plugin de périphérique de
