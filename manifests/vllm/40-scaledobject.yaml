@@ -60,12 +60,40 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "3"
 spec:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🩹 KEDA NE PILOTE PLUS QUE LE DÉBORDEMENT — 2026-11-07
+  #
+  # AVANT : un seul Deployment `vllm-mistral`, min 1 / max 4. La descente de 2
+  # à 1 réplique a supprimé le pod du PLANCHER et gardé celui du débordement :
+  # l'ODCR tournait à vide et le nœud on-demand ne partait plus, puisqu'un pool
+  # en `WhenEmpty` ne retire que les nœuds vides.
+  #
+  # LA CAUSE EST DANS LE CODE, pas dans un réglage. `ActivePodsWithRanks.Less`
+  # (pkg/controller/controller_utils.go) classe les candidats à la suppression
+  # en 8 règles, et aucune ne connaît l'affinité. Les règles 6 et 8 comparent
+  # les temps « in a LOGARITHMIC scale … If two pods have the same logarithmic
+  # rank, they are sorted by UUID to provide a pseudorandom order ». Nos deux
+  # pods étaient prêts depuis 34 et 18 min, donc dans le même seau : le
+  # départage s'est fait **par UUID**. Ce n'était pas un aléa à rejouer.
+  #
+  # LA SÉPARATION EST LE SEUL REMÈDE DÉCLARATIF. Deux Deployments donnent deux
+  # ReplicaSets, donc deux listes de candidats DISJOINTES. Le plancher sort
+  # définitivement de la portée de KEDA.
+  #
+  # L'ENVELOPPE EST INCHANGÉE : 1 réplique de plancher, fixe, plus 0 à 3 de
+  # débordement = 1 à 4 au total, exactement comme avant.
+  #
+  # `minReplicaCount: 0` est désormais possible ET souhaitable : au repos il
+  # n'y a plus aucune réplique de débordement, donc plus aucun nœud
+  # on-demand payé à vide. L'activation depuis zéro repose sur
+  # l'`activationThreshold` du déclencheur, déjà posé à "1" plus bas.
+  # ═══════════════════════════════════════════════════════════════════════════
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: vllm-mistral
-  minReplicaCount: 1
-  maxReplicaCount: 4
+    name: vllm-mistral-burst
+  minReplicaCount: 0
+  maxReplicaCount: 3
   # 15 s : assez court pour que la réaction soit visible, mais ce n'est PAS le
   # facteur limitant. La chaîne complète est
   #   vLLM /metrics → intervalle de scrape du collecteur → AMP
