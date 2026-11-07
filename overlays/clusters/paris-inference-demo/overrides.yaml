@@ -2824,15 +2824,76 @@ platform-manifests-bootstrap:
                   #
                   # À REMETTRE APRÈS LE 17/11.
                   # ═════════════════════════════════════════════════════════
+                  # ═════════════════════════════════════════════════════════
+                  # 🩹 LE POOL EST ÉLARGI AU MAXIMUM — 2026-11-07
+                  #     Décision de Sébastien, après deux tests bloqués.
+                  #
+                  # CE QUI A ÉTÉ MESURÉ, et qui force la main : l'on-demand
+                  # `g6.2xlarge` est épuisé en eu-west-3b. Le test R1 a rendu
+                  # 7 NodeClaims refusées et 441 s d'attente pour UN nœud ; le
+                  # test R2, **56 erreurs** `InsufficientInstanceCapacity` et
+                  # AUCUN nœud en 20 min de charge. Un seul type dans une
+                  # seule zone sans spot, c'est un pari à une seule carte.
+                  #
+                  # LE SPOT REVIENT EN REPLI. Le pattern est éprouvé : le
+                  # 06/11, une reprise spot réelle a été absorbée par un
+                  # remplacement on-demand créé 1 s plus tard, Ready 56 s
+                  # après. `In` est un opérateur d'ENSEMBLE, sans préférence
+                  # d'ordre ; Karpenter retient l'offre la moins chère
+                  # compatible et retombe sur l'on-demand quand le spot est
+                  # refusé.
+                  # ═════════════════════════════════════════════════════════
                   - key: "karpenter.sh/capacity-type"
                     operator: In
-                    values: ["on-demand"]
+                    values: ["spot", "on-demand"]
                   - key: "kubernetes.io/arch"
                     operator: In
                     values: ["amd64"]
+                  # ═════════════════════════════════════════════════════════
+                  # TOUTES LES TAILLES g6 À UN SEUL GPU — SAUF g6.xlarge
+                  #
+                  # Nombre de GPU relevé par l'API EC2, pas supposé :
+                  #   g6.xlarge    4 vCPU   16 Gio   1x L4   ← EXCLU, voir plus bas
+                  #   g6.2xlarge   8 vCPU   32 Gio   1x L4
+                  #   g6.4xlarge  16 vCPU   64 Gio   1x L4
+                  #   g6.8xlarge  32 vCPU  128 Gio   1x L4
+                  #   g6.16xlarge 64 vCPU  256 Gio   1x L4
+                  #   g6.12xlarge 48 vCPU  192 Gio   4x L4   ← multi-GPU, hors sujet
+                  # Les 22 888 Mio de VRAM sont IDENTIQUES sur toutes : le
+                  # modèle tient pareil, seuls le CPU, la RAM et le prix
+                  # changent. Élargir ne dégrade donc pas la démonstration.
+                  #
+                  # ⛔ POURQUOI g6.xlarge EST EXCLU, et c'est une certitude et
+                  # non une estimation. Le pod demande `cpu: "4"`, soit
+                  # EXACTEMENT les 4 vCPU de l'instance. Or Auto Mode réserve
+                  # toujours une part : mesuré sur le nœud du plancher,
+                  # `capacity 8` contre `allocatable 7760m`, donc 240m
+                  # réservés. Quelle que soit la réserve exacte sur une 4 vCPU,
+                  # l'allocatable est < 4000m et la requête ne peut pas tenir.
+                  # La mémoire enfonce le clou : l'allocatable mesuré vaut
+                  # 91 % du nominal (29,13 Gio sur 32), soit ~14,6 Gio sur une
+                  # g6.xlarge, contre **16 Gio demandés**. Deux raisons
+                  # indépendantes, aucune marge.
+                  # (Abaisser les requests pour l'y faire entrer serait un
+                  # autre levier, et il dégraderait le plancher aussi, puisque
+                  # les deux Deployments partagent ces valeurs.)
+                  # ═════════════════════════════════════════════════════════
                   - key: "node.kubernetes.io/instance-type"
                     operator: In
-                    values: ["g6.2xlarge"]
+                    values: ["g6.2xlarge", "g6.4xlarge", "g6.8xlarge", "g6.16xlarge"]
+                  # ═════════════════════════════════════════════════════════
+                  # LA ZONE RESTE eu-west-3b SEULE, et ce n'est pas un oubli.
+                  #
+                  # `describe-instance-type-offerings` interrogé taille par
+                  # taille : les CINQ g6 ne sont offertes qu'en **eu-west-3b et
+                  # eu-west-3c**. AUCUNE n'existe en eu-west-3a. Ajouter 3a à
+                  # cette liste ne donnerait donc aucune capacité
+                  # supplémentaire — seulement l'illusion d'en avoir.
+                  # Et eu-west-3c, que l'erreur d'AWS recommande, n'a **aucun
+                  # sous-réseau** dans ce VPC : l'ouvrir demanderait un
+                  # sous-réseau neuf et l'extension des endpoints VPC, ce qui
+                  # n'est pas dans ce commit.
+                  # ═════════════════════════════════════════════════════════
                   - key: "topology.kubernetes.io/zone"
                     operator: In
                     values: ["eu-west-3b"]
