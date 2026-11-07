@@ -54,7 +54,38 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: '1'
 spec:
-  replicas: 0
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🩹 AUCUN `replicas` ICI, ET C'EST VOULU — 2026-11-07
+  #
+  # Ce champ appartient à KEDA. Il était fixé à 0, et Argo CD le ramenait donc
+  # à 0 par `selfHeal` dès que KEDA le levait. MESURÉ : l'exécuteur d'échelle
+  # de KEDA a réécrit `Original 0 -> New 1` CINQ FOIS DE SUITE, au pas de 15 s
+  # de son `pollingInterval` (17:18:45Z à 17:19:45Z), Argo remettant 0 derrière
+  # lui à chaque passage ; la synchronisation de `17:20:30Z` a ensuite ramené
+  # `replicas` de 3 à 0. Témoin direct : une montée à la main à 1 a été remise
+  # à 0 en CINQ SECONDES.
+  #
+  # Une réplique de débordement a besoin d'environ trois minutes pour charger
+  # son modèle sur un nœud neuf. Elle en obtenait cinq secondes : AUCUNE ne
+  # pouvait servir. C'est la cause unique de tous les tests de débordement
+  # restés sans réplique servie — y compris ceux dont l'échec avait été imputé
+  # à la capacité AWS.
+  #
+  # RETIRER LE CHAMP, plutôt que l'exempter dans l'Application : c'est la
+  # recommandation d'Argo CD pour toute charge pilotée par une HPA. Sans champ
+  # dans le manifeste, Argo n'a plus rien à réconcilier et ne peut plus entrer
+  # en conflit. Le plancher, lui, GARDE son `replicas: 1` dans git : il n'est
+  # pas piloté par KEDA, et une dérive dessus DOIT être corrigée.
+  #
+  # ⚠ EFFET DE BORD À LA PREMIÈRE SYNCHRONISATION, et à lui seul. Argo est en
+  # apply CLIENT-SIDE ici (aucun `ServerSideApply=true` dans les syncOptions),
+  # et `replicas: 0` figure dans l'annotation `last-applied-configuration`
+  # vivante. La fusion à trois voies va donc SUPPRIMER le champ, et l'API
+  # appliquera sa valeur par défaut, soit 1 — une seule fois. KEDA, dont le
+  # déclencheur est inactif et le `cooldownPeriod` déjà écoulé, le ramène à 0
+  # au sondage suivant. Les synchronisations ultérieures ne touchent plus rien,
+  # le champ ayant quitté `last-applied-configuration`.
+  # ═══════════════════════════════════════════════════════════════════════════
   revisionHistoryLimit: 2
   selector:
     matchLabels:
