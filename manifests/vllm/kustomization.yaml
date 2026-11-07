@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Ce fichier ne change RIEN au contenu rendu. Il existe pour une seule raison :
+# rendre ce répertoire éligible à `source.kustomize.images` dans l'Application
+# Argo CD, ce qu'une source de type « répertoire nu » n'autorise pas.
+#
+# POURQUOI CE DÉTOUR. L'image vLLM est désormais servie par un dépôt ECR privé
+# en région (voir ../aws-accel/README.md). Or l'URL d'un dépôt ECR privé
+# contient OBLIGATOIREMENT le numéro de compte — aucune forme alternative
+# n'existe — et ce dépôt est public, avec pour règle de n'y écrire aucun
+# identifiant de compte.
+#
+# La référence d'image complète vit donc dans l'Application `vllm-paris`,
+# posée à la main et jamais commitée, sous
+#   spec.source.kustomize.images:
+#     - vllm/vllm-openai=<compte>.dkr.ecr.eu-west-3.amazonaws.com/peeks/vllm-openai@sha256:607442e4…71ec2db
+#
+# CE QUI RESTE TRAÇABLE DANS GIT, et c'est l'essentiel : le digest lui-même,
+# documenté dans ../aws-accel/README.md et dans la checklist J-1. Le digest est
+# le contenu ; seul l'emplacement est hors du dépôt.
+#
+# ⚠ AUCUN BLOC `images:` ICI. L'override doit rester dans l'Application, sinon
+# le numéro de compte reviendrait dans le fork par cette porte.
+#
+# ORDRE DES RESSOURCES : conservé tel quel pour que le rendu reste comparable
+# à l'état d'avant. Les préfixes numériques des fichiers portent déjà l'ordre
+# de dépendance, et les `sync-wave` d'Argo font foi à la synchronisation.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - 00-namespace.yaml
+  - 10-deployment.yaml
+  - 20-service.yaml
+  - 30-triggerauthentication.yaml
+  - 40-scaledobject.yaml

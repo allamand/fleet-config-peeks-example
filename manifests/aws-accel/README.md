@@ -69,6 +69,58 @@ suppression accidentelle n'emporte jamais les ressources AWS.
 > `aws-accel-paris` existe, est `Synced`/`Healthy`, et **aucun** des
 > ApplicationSets du hub ne la revendique (contrôle : `ownerReferences` vide).
 
+## L'image, et où vit sa référence
+
+L'image a été copiée depuis Docker Hub avec `docker buildx imagetools create`,
+et **non** par un `docker pull` suivi d'un `push`. La raison est vérifiable :
+le tag amont est une **liste de manifestes** à deux plateformes, et un
+pull/push n'en rapporterait qu'une, produisant donc un autre digest.
+
+| | |
+|---|---|
+| dépôt | `peeks/vllm-openai` |
+| tag | `v0.10.2` |
+| **digest** | **`sha256:607442e407b0fea97f8a132a78b787c121a996dd4de181fa08e8da06e71ec2db`** |
+| type | `application/vnd.docker.distribution.manifest.list.v2+json` |
+| plateformes | `linux/amd64` et `linux/arm64` |
+
+Ce digest est **identique** à celui du tag amont `vllm/vllm-openai:v0.10.2` —
+contrôlé après le push, et c'est la preuve que le contenu n'a pas changé de
+main.
+
+### Pourquoi la référence complète n'est pas dans ce dépôt
+
+L'URL d'un dépôt ECR privé contient **obligatoirement** le numéro de compte
+(`<compte>.dkr.ecr.eu-west-3.amazonaws.com/…`) : aucune forme alternative
+n'existe. Ce dépôt est public et n'accueille aucun identifiant de compte.
+
+La référence vit donc dans l'Application `vllm-paris`, posée à la main et
+jamais commitée :
+
+```yaml
+spec:
+  source:
+    kustomize:
+      images:
+        - vllm/vllm-openai=<compte>.dkr.ecr.eu-west-3.amazonaws.com/peeks/vllm-openai@sha256:607442e4…71ec2db
+```
+
+C'est ce qui a imposé d'ajouter `../vllm/kustomization.yaml` : une source Argo
+de type « répertoire nu » n'accepte pas `kustomize.images`. Ce fichier ne
+change **rien** au contenu rendu — vérifié par comparaison champ par champ
+entre le rendu `kustomize` et les cinq manifestes d'origine, et l'override
+lui-même ne modifie qu'un seul chemin,
+`.spec.template.spec.containers[0].image`.
+
+**Ce qui reste donc traçable dans git, et c'est l'essentiel : le digest.** Un
+digest désigne un contenu ; seul son emplacement est hors du dépôt. Et comme
+le pin est un digest et non un tag, le passage du dépôt en `MUTABLE` ne retire
+aucune garantie sur ce que le pod exécute.
+
+> **À VÉRIFIER LE 16/11 — checklist J-1 :** l'Application `vllm-paris` porte
+> toujours `kustomize.images` avec le digest `sha256:607442e4…71ec2db`, et le
+> pod en service tourne bien sur ce digest.
+
 ## Politique de suppression
 
 Les quatre CR portent `services.k8s.aws/deletion-policy: retain`. Supprimer un
