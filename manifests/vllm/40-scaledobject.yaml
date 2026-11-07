@@ -88,7 +88,44 @@ spec:
               value: 2
               periodSeconds: 30
         scaleDown:
-          stabilizationWindowSeconds: 60
+          # ═════════════════════════════════════════════════════════════════
+          # 🩹 60 s -> 900 s, LE 2026-11-07, SUR LA CAUSE MESURÉE DU TEST R0bis
+          #
+          # CETTE VALEUR ÉTAIT LA CAUSE DE L'ÉCHEC, pas un réglage de confort.
+          # Le test du 06/11 n'a jamais fait servir une réplique de
+          # débordement : les quatre ont été supprimées PENDANT le chargement
+          # du modèle. La chronologie mesurée est sans ambiguïté —
+          #   23:12:38–23:13:02  les 3 conteneurs de débordement démarrent
+          #   23:16:18           la HPA redescend à 3 répliques
+          #   23:17:18           une deuxième réplique est supprimée
+          #   ~23:18:30          la dernière part
+          #   23:18:20–23:18:40  l'instant où elles auraient servi
+          # Elles ont été tuées à une vingtaine de secondes du but, et la
+          # preuve que AUCUNE n'a abouti est que `readyReplicas` vaut 1 sur
+          # les 74 relevés de la descente, sans exception.
+          #
+          # POURQUOI 60 s NE POUVAIT PAS MARCHER : la file
+          # `vllm:num_requests_waiting` se vide dès que la charge s'arrête,
+          # bien avant que les répliques neuves ne soient prêtes. La fenêtre
+          # de stabilisation doit donc couvrir le DÉMARRAGE À FROID complet,
+          # pas la durée de la rafale.
+          #
+          # POURQUOI 900 s : le pire démarrage à froid mesuré est de 588 s
+          # entre la création du pod et le modèle servi (tour 4, plancher).
+          # 900 s laisse 312 s de marge, soit 1,53x le mesuré. C'est aussi la
+          # valeur que recommande [[scaling-patterns-eks-inference]], donc la
+          # seule des trois corrections de l'étape 0 qui soit citée et non
+          # déduite.
+          #
+          # CE QUE ÇA COÛTE, ET C'EST ASSUMÉ : après une rafale, les répliques
+          # de débordement restent 15 min. Sur une démo de 22 min, c'est
+          # voulu — on veut qu'elles restent à l'écran. Hors démo, c'est un
+          # réglage à redescendre.
+          #
+          # À MESURER AU PROCHAIN TEST (point 8 de la note) : vider la file
+          # pendant le chargement et vérifier qu'aucune réplique ne part.
+          # ═════════════════════════════════════════════════════════════════
+          stabilizationWindowSeconds: 900
           policies:
             - type: Pods
               value: 1
