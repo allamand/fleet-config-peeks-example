@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dépôt ECR privé pour l'image vLLM, en région — piste 2 de la note
+# pistes-acceleration-gpu-burst.md.
+#
+# POURQUOI : le pull mesuré le 06/11 est de 152 s pour 11,5 Go, soit
+# 0,60 Gbps — 12 % de la bande passante de base d'une g6.2xlarge
+# (5,0 Gbps documentés). L'image sort aujourd'hui sur Internet depuis
+# Docker Hub via le NAT. Le goulot n'est ni le GPU, ni le disque, ni le
+# snapshotter : c'est le chemin réseau. Rapatrier l'image en région est
+# le levier le moins impressionnant et le plus rentable.
+#
+# CE QUE LA DOC AWS EN DIT : « Store your container image in Amazon ECR…
+# Configure an Amazon ECR VPC endpoint so that nodes pull images over the
+# AWS backbone rather than the public internet » (blog Containers,
+# « How to run AI model inference with GPUs on Amazon EKS Auto Mode »).
+#
+# AUCUN RÔLE IAM NOUVEAU N'EST REQUIS, et c'est vérifié : le rôle des
+# nœuds de la NodeClass GPU porte déjà `AmazonEC2ContainerRegistryPullOnly`.
+# Simulation IAM sur ce rôle :
+#   ecr:GetAuthorizationToken      allowed
+#   ecr:BatchGetImage              allowed
+#   ecr:GetDownloadUrlForLayer     allowed
+#   ecr:BatchCheckLayerAvailability  implicitDeny  ← normal, c'est du PUSH
+#
+# IMMUABLE : le tag `v0.10.2` ne doit jamais désigner deux contenus
+# différents. C'est aussi ce qui rend vérifiable l'exigence « même
+# digest » : une fois poussé, le tag est scellé.
+#
+# SUPPRESSION : `deletion-policy: retain`. Supprimer ce CR ne supprime
+# PAS le dépôt ni ses images — et c'est voulu, un dépôt vidé par erreur
+# rendrait tous les nœuds de débordement incapables de démarrer.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: ecr.services.k8s.aws/v1alpha1
+kind: Repository
+metadata:
+  name: peeks-vllm-openai
+  namespace: paris-inference-demo
+  labels:
+    managed-by: peeks
+  annotations:
+    services.k8s.aws/region: eu-west-3
+    # adopt-or-create : idempotent. Si le dépôt existe déjà (rejeu, ou
+    # création antérieure), ACK l'adopte au lieu d'échouer. Les dépôts ECR
+    # sont identifiés par leur NOM, porté par spec.name, donc la clé
+    # naturelle suffit — aucune `adoption-fields`, comme pour les Role IAM.
+    services.k8s.aws/adoption-policy: adopt-or-create
+    services.k8s.aws/deletion-policy: retain
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    # Vague -2 : le dépôt doit exister avant que quoi que ce soit n'y pousse
+    # ou n'en tire.
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  name: peeks/vllm-openai
+  imageTagMutability: IMMUTABLE
+  imageScanningConfiguration:
+    scanOnPush: true
+  encryptionConfiguration:
+    # AES256 = clé gérée par ECR. Pas de KMS : une clé gérée par le client
+    # ajouterait une dépendance de permission pour le rôle des nœuds
+    # (kms:Decrypt) qu'ils n'ont pas aujourd'hui, et il faudrait donc
+    # créer ou modifier une politique IAM — hors de ce qui est autorisé ici.
+    encryptionType: AES256
+  tags:
+    - key: owner
+      value: sallaman
+    - key: purpose
+      value: aws-experience-paris-2026-11-17
+    - key: managed-by
+      value: ack
+    - key: auto-delete
+      value: "no"

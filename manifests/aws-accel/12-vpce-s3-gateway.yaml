@@ -1,0 +1,65 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Endpoint VPC de type Gateway pour S3 — LA PIÈCE QUI SERT LES DEUX PISTES.
+#
+# Pour la piste 2 : ECR stocke les couches d'image sur S3. Sans cet
+# endpoint, les deux endpoints d'interface rendent l'authentification
+# privée mais les 11,5 Go de couches continuent de sortir par le NAT. Le
+# gain serait nul, et l'erreur serait invisible — c'est le piège de cette
+# piste.
+#
+# Pour la piste 1 : les poids du modèle seront lus depuis S3 par
+# `runai_streamer`. La doc AWS est explicite sur la nécessité —
+# « With the Gateway VPC endpoint, traffic to S3 stays on the AWS network
+# and bypasses the NAT Gateway entirely… EKS Auto Mode commonly places
+# nodes in private subnets, so traffic to S3 flows through a NAT Gateway
+# by default » (EKS User Guide, « Accelerate model loading on Amazon EKS »).
+#
+# UN GATEWAY N'EST PAS UN ENDPOINT D'INTERFACE, et c'est pourquoi ce
+# fichier ne ressemble pas aux deux autres :
+#   · pas d'ENI, donc ni sous-réseau ni groupe de sécurité ;
+#   · pas de DNS privé — il agit par une ROUTE, ajoutée aux tables de
+#     routage qu'on lui désigne ;
+#   · gratuit, là où un endpoint d'interface se paie à l'heure et au Go.
+#
+# LES DEUX TABLES SONT CELLES DES SOUS-RÉSEAUX PRIVÉS, relevées et non
+# supposées — les associations explicites donnent :
+#   subnet-096c17d8… (eu-west-3b, nœuds GPU) -> rtb-0412a2b6…
+#   subnet-05de189b… (eu-west-3a)            -> rtb-0bd90723…
+# La table PRINCIPALE du VPC (rtb-0de49726…) est volontairement EXCLUE :
+# elle ne sert aucun de nos deux sous-réseaux, et l'y ajouter étendrait la
+# route à des sous-réseaux que nous ne connaissons pas.
+#
+# AUCUNE POLITIQUE D'ENDPOINT n'est posée : par défaut un gateway autorise
+# tout accès S3 que l'IAM de l'appelant permet déjà. Restreindre ici
+# romprait d'autres usages S3 du cluster (ESO, Backstage, DevLake) sans
+# bénéfice pour nous.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: VPCEndpoint
+metadata:
+  name: vpce-s3-gateway
+  namespace: paris-inference-demo
+  labels:
+    managed-by: peeks
+  annotations:
+    services.k8s.aws/region: eu-west-3
+    services.k8s.aws/adoption-policy: adopt-or-create
+    services.k8s.aws/deletion-policy: retain
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  vpcID: vpc-0fa7dd0efd5a25eb4
+  serviceName: com.amazonaws.eu-west-3.s3
+  vpcEndpointType: Gateway
+  routeTableIDs:
+    - rtb-0412a2b61cebc128b   # sert subnet-096c17d8… — eu-west-3b, nœuds GPU
+    - rtb-0bd9072380f3cb709   # sert subnet-05de189b… — eu-west-3a
+  tags:
+    - key: owner
+      value: sallaman
+    - key: purpose
+      value: aws-experience-paris-2026-11-17
+    - key: managed-by
+      value: ack
+    - key: auto-delete
+      value: "no"

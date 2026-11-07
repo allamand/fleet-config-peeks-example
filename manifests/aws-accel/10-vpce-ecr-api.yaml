@@ -1,0 +1,63 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Endpoint VPC d'interface pour l'API ECR — piste 2.
+#
+# IL N'EXISTAIT AUCUN ENDPOINT VPC dans eu-west-3 avant ce commit : la
+# requête à l'échelle du compte en rendait zéro. Tout le trafic ECR et S3
+# des nœuds sort donc aujourd'hui par le NAT.
+#
+# LES TROIS ENDPOINTS VONT ENSEMBLE, et c'est le piège de cette piste :
+#   · `ecr.api`  → les appels de plan de contrôle (authentification,
+#                  résolution du manifeste)
+#   · `ecr.dkr`  → le protocole de registre lui-même
+#   · S3 gateway → les COUCHES, qu'ECR stocke sur S3
+# Sans le gateway S3, l'authentification passe en privé mais les 11,5 Go de
+# couches sortent quand même par le NAT : on déplace le goulot sans le lever.
+#
+# POURQUOI LE SG DES NŒUDS CONVIENT, vérifié et non supposé : le groupe
+# `eks-cluster-sg-paris-inference-demo-…` porte une règle entrante
+# `IpProtocol: -1` depuis LUI-MÊME. Les ENI des nœuds Auto Mode portent ce
+# même groupe, donc un nœud joint l'endpoint en 443 sans aucune règle à
+# ajouter. Aucune modification de groupe de sécurité dans ce commit.
+#
+# `privateDNSEnabled: true` : c'est ce qui fait que
+# `<compte>.dkr.ecr.eu-west-3.amazonaws.com` résout vers l'adresse privée
+# de l'endpoint SANS changer la référence d'image. Sans lui, l'endpoint
+# existe et ne sert à rien.
+#
+# LES DEUX SOUS-RÉSEAUX, pas un seul : eu-west-3b porte les nœuds GPU
+# aujourd'hui, mais un endpoint d'interface est zonal. Couvrir 3a aussi
+# coûte une ENI et évite qu'un nœud placé en 3a retombe silencieusement
+# sur le NAT.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: VPCEndpoint
+metadata:
+  name: vpce-ecr-api
+  namespace: paris-inference-demo
+  labels:
+    managed-by: peeks
+  annotations:
+    services.k8s.aws/region: eu-west-3
+    services.k8s.aws/adoption-policy: adopt-or-create
+    services.k8s.aws/deletion-policy: retain
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  vpcID: vpc-0fa7dd0efd5a25eb4
+  serviceName: com.amazonaws.eu-west-3.ecr.api
+  vpcEndpointType: Interface
+  privateDNSEnabled: true
+  subnetIDs:
+    - subnet-096c17d8ce9bef35b   # eu-west-3b, 10.60.12.0/24 — les nœuds GPU
+    - subnet-05de189b86c96aa58   # eu-west-3a, 10.60.11.0/24
+  securityGroupIDs:
+    - sg-05897eaa10705f2ea       # eks-cluster-sg, règle -1 depuis lui-même
+  tags:
+    - key: owner
+      value: sallaman
+    - key: purpose
+      value: aws-experience-paris-2026-11-17
+    - key: managed-by
+      value: ack
+    - key: auto-delete
+      value: "no"
