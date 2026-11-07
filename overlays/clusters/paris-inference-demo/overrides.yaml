@@ -2791,9 +2791,42 @@ platform-manifests-bootstrap:
                   # façon de savoir si le spot a fini par se matérialiser ou
                   # si tout est venu de l'on-demand.
                   # ═════════════════════════════════════════════════════════
+                  #
+                  # ═════════════════════════════════════════════════════════
+                  # 🩹 LE SPOT EST RETIRÉ POUR LE 17/11 — 2026-11-07
+                  #     Décision de Sébastien, sur la mesure du test R0bis.
+                  #
+                  # CE QUI A ÉTÉ MESURÉ, et qui tranche : le repli on-demand
+                  # a parfaitement fonctionné, ET il a été déclenché pour de
+                  # vrai. À 357 s du test, l'API EC2 a rendu
+                  #   sir-… state=closed
+                  #   code = instance-terminated-no-capacity
+                  #   « Your Spot instance was terminated because there is no
+                  #     Spot capacity available that matches your request. »
+                  # Karpenter a drainé le nœud et créé le remplacement
+                  # on-demand 1 s plus tard, Ready 56 s après. Le mécanisme
+                  # est donc PROUVÉ bon — ce n'est pas lui qu'on retire.
+                  #
+                  # POURQUOI LE RETIRER QUAND MÊME. Sur une démonstration de
+                  # 22 min avec un démarrage à froid de plusieurs minutes, une
+                  # reprise spot coûte le temps qu'on n'a pas : le nœud repris
+                  # emporte une réplique en cours de chargement, et son
+                  # remplacement recommence à zéro. Le test a aussi montré
+                  # l'effet de bord sur le comptage — 4 NodeClaims pour 3
+                  # autorisées, parce que le remplacement naît avant que la
+                  # reprise ne soit nettoyée.
+                  #
+                  # ET LE SPOT RESTE DANS LE DISCOURS. Ce n'est pas un aveu :
+                  # le pattern de production correct EST le repli
+                  # ["spot", "on-demand"], et nous avons la trace d'une
+                  # reprise réelle absorbée en 57 s pour l'illustrer. On
+                  # montre la mesure, on ne la subit pas en scène.
+                  #
+                  # À REMETTRE APRÈS LE 17/11.
+                  # ═════════════════════════════════════════════════════════
                   - key: "karpenter.sh/capacity-type"
                     operator: In
-                    values: ["spot", "on-demand"]
+                    values: ["on-demand"]
                   - key: "kubernetes.io/arch"
                     operator: In
                     values: ["amd64"]
