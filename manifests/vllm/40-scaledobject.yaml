@@ -101,7 +101,48 @@ spec:
   # et le scrape du collecteur domine ce premier tronçon. C'est l'un des temps
   # que le test doit chiffrer.
   pollingInterval: 15
-  cooldownPeriod: 120
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🩹 120 s -> 900 s, LE 2026-11-07 : LA DESCENTE A DEUX CHEMINS
+  #
+  # La fenêtre de 900 s posée au commit `fd08af6` ne couvre QU'UN des deux, et
+  # le test R2 l'a rendu visible.
+  #
+  #   de `max` vers `minReplicas` du HPA (= 1, car un HPA ne peut pas valoir 0)
+  #       -> gouverné par behavior.scaleDown.stabilizationWindowSeconds = 900 s
+  #   de 1 vers 0
+  #       -> gouverné par KEDA LUI-MÊME, hors HPA, après `cooldownPeriod`
+  #
+  # Tant que `minReplicaCount` valait 1, le second chemin n'existait pas et
+  # 120 s était sans conséquence. En passant le débordement à
+  # `minReplicaCount: 0` — ce qui est souhaitable, puisque au repos il n'y a
+  # plus aucun nœud on-demand payé à vide — on a ouvert un chemin de descente
+  # que la protection ne couvrait pas.
+  #
+  # CE QUE ÇA EXPOSAIT : la DERNIÈRE réplique de débordement, seule et en
+  # train de charger son modèle, pouvait être supprimée 120 s après que la
+  # file soit retombée sous le seuil d'activation — exactement le mode d'échec
+  # du 06/11, où les quatre répliques ont été tuées pendant le chargement.
+  # Le démarrage à froid mesuré le 07/11 est de 70 s sur nœud chaud mais de
+  # ~256 s sur nœud neuf, capacité mise à part : 120 s ne suffit pas.
+  #
+  # 900 s ALIGNE LES DEUX CHEMINS sur la même valeur, celle qui est déjà
+  # justifiée par la mesure : pire démarrage à froid de 588 s, donc 1,53x de
+  # marge.
+  #
+  # CE QUE J'AI MESURÉ ET QUE JE N'EXPLIQUE PAS : au test R2, le débordement
+  # est retombé à 0 en 48 s après la coupure de charge — moins que les 120 s
+  # d'alors. Je n'ai pas l'instant exact où la file est repassée sous le seuil
+  # (les répliques de débordement n'ont jamais été prêtes, donc elles ne
+  # publiaient aucune métrique), donc je ne peux pas attribuer ces 48 s à un
+  # réglage. Ce commit traite le chemin, pas cette anomalie, qui reste à
+  # élucider au prochain test où une réplique de débordement sera réellement
+  # servie.
+  #
+  # COÛT ASSUMÉ, identique à celui de la fenêtre : après une rafale, la
+  # dernière réplique de débordement reste 15 min. Sur une démo de 22 min
+  # c'est voulu. Hors démo, réglage à redescendre avec la fenêtre.
+  # ═══════════════════════════════════════════════════════════════════════════
+  cooldownPeriod: 900
   advanced:
     # On NE restaure PAS le nombre de répliques d'origine à la suppression :
     # pendant le test, une suppression accidentelle du ScaledObject ne doit pas
