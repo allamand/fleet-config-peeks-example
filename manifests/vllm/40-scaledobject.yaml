@@ -209,7 +209,36 @@ spec:
         # celle que la source de données Grafana interroge avec succès depuis
         # le commit 76b9df0 — donc une adresse vérifiée, pas supposée.
         serverAddress: https://aps-workspaces.eu-west-3.amazonaws.com/workspaces/ws-294f5b5c-de0f-497b-ab57-d13f3fb2736d
-        query: sum(vllm:num_requests_waiting)
+        # ═════════════════════════════════════════════════════════════════════
+        # 🩹 FILTRÉ PAR NAMESPACE — 2026-11-08
+        #
+        # POURQUOI. La requête sommait la métrique sur TOUT le cluster. Une
+        # autre instance de vLLM — par exemple une vitrine kro dans son propre
+        # namespace — mise sous charge aurait donc réveillé CE débordement,
+        # pour une file qui n'est pas la sienne. Le ScaledObject ne doit
+        # compter que la file de la démonstration live.
+        #
+        # ⚠ LE LIBELLÉ N'EST PAS `namespace`, ET C'EST UN PIÈGE SILENCIEUX.
+        # Vérifié dans AMP AVANT d'écrire cette ligne, en lisant les libellés
+        # RÉELS de la série et non en les supposant :
+        #
+        #   sum(vllm:num_requests_waiting)                            -> 0
+        #   sum(...{namespace="vllm"})                 -> AUCUNE SÉRIE  ⛔
+        #   sum(...{kubernetes_namespace="vllm"})                      -> 0  ✅
+        #
+        # Le job de scrape `kubernetes-pods` nomme ce libellé
+        # `kubernetes_namespace` ; la série ne porte AUCUN libellé `namespace`.
+        # Et comme `ignoreNullValues` vaut `true` juste en dessous, le filtre
+        # naïf aurait rendu une métrique perpétuellement à 0 : le débordement
+        # ne se serait plus jamais réveillé, SANS la moindre erreur visible.
+        # C'est le genre de panne qu'on ne découvre que sur scène.
+        #
+        # Et attention à `count by (namespace) (...)` comme test d'existence :
+        # il rend bien une valeur, mais avec un jeu de libellés VIDE, parce que
+        # PromQL regroupe toutes les séries dans un groupe unique quand le
+        # libellé est absent. Seul un jeu de libellés PEUPLÉ le prouve.
+        # ═════════════════════════════════════════════════════════════════════
+        query: sum(vllm:num_requests_waiting{kubernetes_namespace="vllm"})
         threshold: "2"
         # En dessous de 1 en attente, le trigger est INACTIF. Cela évite que du
         # bruit à 0 maintienne des répliques inutiles, et laisse le plancher
