@@ -9,7 +9,9 @@
 #     "default" (externalRef);
 #   - weights bucket and ServiceAccount: from the InferenceAccel instance status
 #     (externalRef);
-#   - image repository URI: from the InferenceAccel instance status;
+#   - image URI and weights bucket: from the InferenceAccel instance status;
+#     the graph waits until its seed Jobs have completed (weightsReady,
+#     imageReady), so a first deployment needs no manual copy;
 #   - AMP workspace id: from the platform workspace CR status (externalRef);
 #   - region: spec field filled from the cluster-secret annotation aws_region.
 #
@@ -42,8 +44,6 @@ spec:
         tensorParallelSize: integer | default=1
         streamerConcurrency: integer | default=4
         extraArgs: "[]string"
-      image:
-        digest: string | pattern="^sha256:[a-f0-9]{64}$"   # immutable digest, tags refused
       resources:
         cpu: string | default="4"
         memory: string | default="16Gi"
@@ -95,6 +95,8 @@ spec:
       metadata:
         name: default
   - id: accel
+    readyWhen:
+    - ${accel.?status.?weightsReady.orValue(false) && accel.?status.?imageReady.orValue(false) && accel.?status.?podIdentityReady.orValue(false)}
     externalRef:
       apiVersion: kro.run/v1alpha1
       kind: InferenceAccel
@@ -303,8 +305,9 @@ spec:
               effect: NoSchedule
             containers:
             - name: vllm
-              image: ${accel.status.repositoryURI + "@" + schema.spec.image.digest}
+              image: ${accel.status.imageURI}
               imagePullPolicy: IfNotPresent
+              command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]   # same entrypoint for the upstream vllm-openai and the AWS DLC images
               args: '${["--model", "s3://" + accel.status.bucketName + "/" + schema.spec.model.weightsPrefix + "/", "--load-format", "runai_streamer", "--model-loader-extra-config", "{\"concurrency\":" + string(schema.spec.model.streamerConcurrency) + "}", "--served-model-name", schema.spec.model.name, "--host", "0.0.0.0", "--port", "8000", "--max-model-len", string(schema.spec.model.maxModelLen), "--max-num-seqs", string(schema.spec.model.maxNumSeqs), "--gpu-memory-utilization", schema.spec.model.gpuMemoryUtilization, "--tensor-parallel-size", string(schema.spec.model.tensorParallelSize), "--enable-prefix-caching", "--disable-log-requests"] + (schema.spec.floor.enforceEager ? ["--enforce-eager"] : []) + schema.spec.model.?extraArgs.orValue([])}'
               env:
               - name: HF_HOME
@@ -411,8 +414,9 @@ spec:
               effect: NoSchedule
             containers:
             - name: vllm
-              image: ${accel.status.repositoryURI + "@" + schema.spec.image.digest}
+              image: ${accel.status.imageURI}
               imagePullPolicy: IfNotPresent
+              command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]   # same entrypoint for the upstream vllm-openai and the AWS DLC images
               args: '${["--model", "s3://" + accel.status.bucketName + "/" + schema.spec.model.weightsPrefix + "/", "--load-format", "runai_streamer", "--model-loader-extra-config", "{\"concurrency\":" + string(schema.spec.model.streamerConcurrency) + "}", "--served-model-name", schema.spec.model.name, "--host", "0.0.0.0", "--port", "8000", "--max-model-len", string(schema.spec.model.maxModelLen), "--max-num-seqs", string(schema.spec.model.maxNumSeqs), "--gpu-memory-utilization", schema.spec.model.gpuMemoryUtilization, "--tensor-parallel-size", string(schema.spec.model.tensorParallelSize), "--enable-prefix-caching", "--disable-log-requests"] + (schema.spec.burst.enforceEager ? ["--enforce-eager"] : []) + schema.spec.model.?extraArgs.orValue([])}'
               env:
               - name: HF_HOME

@@ -1,15 +1,30 @@
 # RGD A - InferenceAccel
-# AWS acceleration layer of an inference tenant: private ECR repository for the
-# serving image, private S3 bucket for the weights, optional VPC endpoints, and
-# an IAM role + Pod Identity association that lets the serving pods read the
-# weights. ACK-only (plus one ServiceAccount).
+# Acceleration layer of an inference tenant, deployable from nothing:
+#   - private S3 bucket for the model weights, FILLED by a seed Job
+#     (Hugging Face -> S3, idempotent, via Pod Identity);
+#   - the serving image, brought into the private registry by an ECR
+#     pull-through cache (upstream: ECR Public, no credential) and warmed by a
+#     seed Job, so the first GPU node never waits for the import;
+#   - optional VPC endpoints;
+#   - read-only IAM role + Pod Identity for the serving pods, and a separate
+#     write role + Pod Identity for the seed Jobs (least privilege).
+# Why the seeds live HERE and not in InferenceService: they fill what this RGD
+# creates (bucket, registry path) and need the write role created here.
+# InferenceService only waits on status.weightsReady / status.imageReady.
 #
-# Environment values (account, region, cluster, VPC, subnets, SG, route tables)
-# are spec fields filled at render time from the Argo CD cluster-secret
-# annotations; nothing environment-specific is written in this file.
+# Environment values (account, region, cluster, VPC, subnets, SG) are spec
+# fields filled at render time from the Argo CD cluster-secret annotations;
+# nothing environment-specific is written in this file.
 #
 # The ACK children live in the instance namespace: that namespace needs
 # IAMRoleSelectors for ec2/ecr/eks/iam/s3 (one per service group).
+#
+# shortcut: Jobs are immutable in Kubernetes, so changing weights.huggingFace.*
+#   or image.* on a live instance fails on the Job; delete the instance's Job
+#   (kro recreates it, the seed is idempotent). Upgrade: add a content hash to
+#   the Job name if this is hit in practice.
+# shortcut: gated Hugging Face models are not supported (no token plumbing).
+#   Add an optional secretKeyRef env when such a model is needed.
 apiVersion: kro.run/v1alpha1
 kind: ResourceGraphDefinition
 metadata:
@@ -28,52 +43,50 @@ spec:
         vpcID: string | default=""         # cluster-secret aws_vpc_id (endpoints only)
         subnetIDs: "[]string"              # cluster-secret aws_private_subnet_ids (endpoints only)
         securityGroupID: string | default=""   # cluster-secret aws_cluster_security_group_id
-        routeTableIDs: "[]string"          # no annotation upstream yet (open question 4)
-      repository:
-        name: string | default="vllm"
-        scanOnPush: boolean | default=true
-        # MUTABLE by default: a multi-arch copy (buildx/crane) pushes child
-        # manifests one by one on the same tag; with IMMUTABLE the first one
-        # seals the tag and the next is refused (incident 07/11). Pin by digest
-        # in InferenceService instead.
-        tagMutability: string | default="MUTABLE" enum="MUTABLE,IMMUTABLE"
+        routeTableIDs: "[]string"          # no annotation upstream yet
       weights:
         bucketSuffix: string | default="models"
         prefix: string                     # weights prefix inside the bucket
+        huggingFace:
+          repo: string                     # e.g. mistralai/Mistral-7B-Instruct-v0.3 (public, non-gated)
+          revision: string                 # commit sha: weights are reproducible
+          files: "[]string"                # explicit file list (no parsing, no duplicates such as consolidated.*)
+        seedImage: string | default="public.ecr.aws/aws-cli/aws-cli:2.22.0"
+      image:
+        pullThroughPrefix: string | default="ecr-public"            # prefix of the registry-level pull-through rule
+        upstreamRepository: string | default="deep-learning-containers/vllm"
+        tag: string                        # immutable upstream tag
+        createPullThroughRule: boolean | default=false              # a rule is registry-wide: true only on a registry that has none
+        upstreamRegistryURL: string | default="public.ecr.aws"
       network:
         endpoints: "[]string"              # subset of ecr.api, ecr.dkr, s3 ; empty = none
         privateDNS: boolean | default=true # false only to co-exist with endpoints already in the VPC
       serviceAccount: string | default="inference-weights-reader"
       retain: boolean | default=true       # ACK deletion-policy retain on data/identity
     status:
-      repositoryURI: ${ecr.status.repositoryURI}
       bucketName: ${bucket.spec.name}
       weightsURI: ${"s3://" + bucket.spec.name + "/" + schema.spec.weights.prefix + "/"}
+      imageURI: ${schema.spec.aws.accountId + ".dkr.ecr." + schema.spec.aws.region + ".amazonaws.com/" + schema.spec.image.pullThroughPrefix + "/" + schema.spec.image.upstreamRepository + ":" + schema.spec.image.tag}
       roleArn: ${role.status.ackResourceMetadata.arn}
       serviceAccount: ${sa.metadata.name}
       podIdentityReady: ${pia.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+      weightsReady: ${weightsSeed.?status.?succeeded.orValue(0) >= 1}
+      imageReady: ${imageSeed.?status.?succeeded.orValue(0) >= 1}
   resources:
-  - id: ecr
-    readyWhen:
-    - ${ecr.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+  - id: ptcRule
+    includeWhen:
+    - ${schema.spec.image.createPullThroughRule}
     template:
       apiVersion: ecr.services.k8s.aws/v1alpha1
-      kind: Repository
+      kind: PullThroughCacheRule
       metadata:
-        name: ${schema.metadata.name}-${schema.spec.repository.name}
+        name: ${schema.metadata.name}-${schema.spec.image.pullThroughPrefix}
         annotations:
-          services.k8s.aws/region: ${schema.spec.aws.region}
-          services.k8s.aws/deletion-policy: '${schema.spec.retain ? "retain" : "delete"}'
+          services.k8s.aws/adoption-policy: adopt-or-create
+          services.k8s.aws/deletion-policy: retain
       spec:
-        name: ${schema.metadata.name}-${schema.spec.repository.name}
-        imageTagMutability: ${schema.spec.repository.tagMutability}
-        imageScanningConfiguration:
-          scanOnPush: ${schema.spec.repository.scanOnPush}
-        encryptionConfiguration:
-          encryptionType: AES256
-        tags:
-        - key: kro.run/instance
-          value: ${schema.metadata.name}
+        ecrRepositoryPrefix: ${schema.spec.image.pullThroughPrefix}
+        upstreamRegistryURL: ${schema.spec.image.upstreamRegistryURL}
 
   - id: bucket
     readyWhen:
@@ -85,6 +98,7 @@ spec:
         name: ${schema.metadata.name}-${schema.spec.weights.bucketSuffix}
         annotations:
           services.k8s.aws/region: ${schema.spec.aws.region}
+          services.k8s.aws/adoption-policy: adopt-or-create
           services.k8s.aws/deletion-policy: '${schema.spec.retain ? "retain" : "delete"}'
       spec:
         # Globally unique, derived at runtime: <instance>-<account>-<region>-<suffix>
@@ -161,7 +175,7 @@ spec:
     includeWhen:
     - ${"s3" in schema.spec.network.?endpoints.orValue([])}
     readyWhen:
-    - ${vpceS3.status.?state.orValue("") == "available"}
+    - ${vpceS3.?status.?state.orValue("") == "available"}
     template:
       apiVersion: ec2.services.k8s.aws/v1alpha1
       kind: VPCEndpoint
@@ -180,6 +194,7 @@ spec:
         - key: kro.run/instance
           value: ${schema.metadata.name}
 
+  # ---- identities ----------------------------------------------------------
   - id: role
     readyWhen:
     - ${role.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
@@ -189,6 +204,7 @@ spec:
       metadata:
         name: ${schema.metadata.name}-weights-reader
         annotations:
+          services.k8s.aws/adoption-policy: adopt-or-create
           services.k8s.aws/deletion-policy: '${schema.spec.retain ? "retain" : "delete"}'
       spec:
         name: ${schema.metadata.name}-weights-reader
@@ -224,3 +240,139 @@ spec:
         namespace: ${schema.metadata.namespace}
         serviceAccount: ${sa.metadata.name}
         roleARN: ${role.status.ackResourceMetadata.arn}
+
+  # Seed identity: write to ONE prefix, import ONE pull-through repository.
+  - id: seedRole
+    readyWhen:
+    - ${seedRole.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+    template:
+      apiVersion: iam.services.k8s.aws/v1alpha1
+      kind: Role
+      metadata:
+        name: ${schema.metadata.name}-seed
+        annotations:
+          services.k8s.aws/adoption-policy: adopt-or-create
+          services.k8s.aws/deletion-policy: '${schema.spec.retain ? "retain" : "delete"}'
+      spec:
+        name: ${schema.metadata.name}-seed
+        description: Seed Jobs of an InferenceAccel instance - write weights, warm the image cache
+        assumeRolePolicyDocument: |
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"pods.eks.amazonaws.com"},"Action":["sts:AssumeRole","sts:TagSession"]}]}
+        inlinePolicies:
+          seed: |
+            {"Version":"2012-10-17","Statement":[{"Sid":"WriteWeightsPrefix","Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],"Resource":"arn:aws:s3:::${bucket.spec.name}/${schema.spec.weights.prefix}/*"},{"Sid":"ListThisBucket","Effect":"Allow","Action":["s3:ListBucket","s3:GetBucketLocation"],"Resource":"arn:aws:s3:::${bucket.spec.name}"},{"Sid":"EcrToken","Effect":"Allow","Action":"ecr:GetAuthorizationToken","Resource":"*"},{"Sid":"ImportOneUpstreamRepository","Effect":"Allow","Action":["ecr:CreateRepository","ecr:BatchImportUpstreamImage","ecr:TagResource","ecr:BatchGetImage","ecr:GetDownloadUrlForLayer","ecr:BatchCheckLayerAvailability","ecr:DescribeImages"],"Resource":"arn:aws:ecr:${schema.spec.aws.region}:${schema.spec.aws.accountId}:repository/${schema.spec.image.pullThroughPrefix}/${schema.spec.image.upstreamRepository}"}]}
+        tags:
+        - key: kro.run/instance
+          value: ${schema.metadata.name}
+
+  - id: seedSa
+    template:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: ${schema.metadata.name}-seed
+
+  - id: seedPia
+    readyWhen:
+    - ${seedPia.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+    template:
+      apiVersion: eks.services.k8s.aws/v1alpha1
+      kind: PodIdentityAssociation
+      metadata:
+        name: ${schema.metadata.name}-seed
+        annotations:
+          services.k8s.aws/region: ${schema.spec.aws.region}
+      spec:
+        clusterName: ${schema.spec.aws.clusterName}
+        namespace: ${schema.metadata.namespace}
+        serviceAccount: ${seedSa.metadata.name}
+        roleARN: ${seedRole.status.ackResourceMetadata.arn}
+
+  # ---- seeds ---------------------------------------------------------------
+  # Weights: Hugging Face -> S3, streamed (no local disk), skipped when the
+  # object already exists, size checked against the upstream header, a short
+  # object is deleted so the next attempt retries it.
+  - id: weightsSeed
+    readyWhen:
+    - ${weightsSeed.?status.?succeeded.orValue(0) >= 1}
+    template:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: ${schema.metadata.name}-weights-seed
+        annotations:
+          kro.run/after: ${seedPia.metadata.name}
+      spec:
+        backoffLimit: 6
+        template:
+          spec:
+            restartPolicy: OnFailure
+            serviceAccountName: ${seedSa.metadata.name}
+            containers:
+            - name: seed
+              image: ${schema.spec.weights.seedImage}
+              command: ["/bin/bash", "-euo", "pipefail", "-c"]
+              args:
+              - |
+                BASE="https://huggingface.co/$REPO/resolve/$REV"
+                for f in $FILES; do
+                  key="$PREFIX/$f"
+                  want=$(curl -sI --retry 5 "$BASE/$f" | tr -d '\r' | awk 'tolower($1)=="x-linked-size:"{s=$2} tolower($1)=="content-length:"{c=$2} END{print (s?s:c)}')
+                  have=$(aws s3api head-object --bucket "$BUCKET" --key "$key" --query ContentLength --output text 2>/dev/null || echo none)
+                  if [ "$have" = "$want" ]; then echo "skip $f ($have bytes)"; continue; fi
+                  echo "get $f ($want bytes)"
+                  curl -sfL --retry 5 --retry-delay 5 "$BASE/$f" | aws s3 cp - "s3://$BUCKET/$key" --expected-size "$want" --only-show-errors
+                  got=$(aws s3api head-object --bucket "$BUCKET" --key "$key" --query ContentLength --output text)
+                  if [ "$got" != "$want" ]; then echo "size mismatch on $f: $got != $want"; aws s3api delete-object --bucket "$BUCKET" --key "$key"; exit 1; fi
+                done
+                echo "weights ready"
+              env:
+              - {name: REPO, value: '${schema.spec.weights.huggingFace.repo}'}
+              - {name: REV, value: '${schema.spec.weights.huggingFace.revision}'}
+              - {name: FILES, value: '${schema.spec.weights.huggingFace.files.join(" ")}'}
+              - {name: BUCKET, value: '${bucket.spec.name}'}
+              - {name: PREFIX, value: '${schema.spec.weights.prefix}'}
+              - {name: AWS_REGION, value: '${schema.spec.aws.region}'}
+              resources:
+                requests: {cpu: 500m, memory: 1Gi}
+                limits: {memory: 2Gi}
+
+  # Image: asking the registry for the tag with an import-capable identity
+  # makes the pull-through cache create the repository and import the image;
+  # the Job waits until it is described. Kubelet (pull-only node role) then
+  # finds it in the private registry.
+  - id: imageSeed
+    readyWhen:
+    - ${imageSeed.?status.?succeeded.orValue(0) >= 1}
+    template:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: ${schema.metadata.name}-image-seed
+        annotations:
+          kro.run/after: ${seedPia.metadata.name}
+      spec:
+        backoffLimit: 6
+        template:
+          spec:
+            restartPolicy: OnFailure
+            serviceAccountName: ${seedSa.metadata.name}
+            containers:
+            - name: seed
+              image: ${schema.spec.weights.seedImage}
+              command: ["/bin/bash", "-euo", "pipefail", "-c"]
+              args:
+              - |
+                for i in $(seq 1 120); do
+                  if aws ecr describe-images --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" >/dev/null 2>&1; then echo "image present"; exit 0; fi
+                  aws ecr batch-get-image --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" --accepted-media-types application/vnd.docker.distribution.manifest.v2+json application/vnd.oci.image.manifest.v1+json >/dev/null 2>&1 || true
+                  echo "waiting for import ($i)"; sleep 10
+                done
+                echo "image not imported"; exit 1
+              env:
+              - {name: REPOSITORY, value: '${schema.spec.image.pullThroughPrefix + "/" + schema.spec.image.upstreamRepository}'}
+              - {name: TAG, value: '${schema.spec.image.tag}'}
+              - {name: AWS_REGION, value: '${schema.spec.aws.region}'}
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+                limits: {memory: 256Mi}

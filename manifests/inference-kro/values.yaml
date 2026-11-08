@@ -23,15 +23,34 @@ accel:
   # The hub VPC already has ECR/S3 endpoints with private DNS (old stack).
   # They move into the RGD at phase 4 only (see plan-bascule-rgd.md).
   endpoints: []
+  retain: true
+  weights:
+    prefix: mistral-7b-instruct-v0.3
+    huggingFace:
+      repo: mistralai/Mistral-7B-Instruct-v0.3     # Apache-2.0, not gated: no token
+      revision: c170c708c41dac9275d15a8fff4eca08d52bab71
+      files:                                        # no consolidated.safetensors (duplicate 14.5 GB)
+      - config.json
+      - generation_config.json
+      - model.safetensors.index.json
+      - model-00001-of-00003.safetensors
+      - model-00002-of-00003.safetensors
+      - model-00003-of-00003.safetensors
+      - params.json
+      - special_tokens_map.json
+      - tokenizer.json
+      - tokenizer.model
+      - tokenizer.model.v3
+      - tokenizer_config.json
+  image:
+    # AWS vLLM Deep Learning Container (vLLM 0.10.2, CUDA 12.8, amd64, with
+    # runai-model-streamer[s3]) through the registry-level pull-through rule
+    # "ecr-public" (upstream public.ecr.aws, no credential).
+    tag: 0.10.2-gpu-py312-cu129-ubuntu22.04-ec2-v1.0
 
 service:
-  # false until the image and the weights are copied into the InferenceAccel
-  # repository and bucket (otherwise the pods pull from an empty repository).
-  enabled: false
+  enabled: true
   zoneSuffix: b                 # GPU zone: where the g6 capacity and the ODCR are
-  # amd64 manifest of the vLLM 0.10.2 image, copied by digest into the
-  # repository created by InferenceAccel.
-  imageDigest: sha256:df2607b26bdda2875de4832f4d08da0055b4b6e3570347f3a849bcc652771dd6
   # 0 at rest (no GPU node). Set to 1 before a rehearsal or the demo.
   floorReplicas: 0
   burstMaxReplicas: 2           # floor 1 + burst 2 = 3 GPU nodes at most

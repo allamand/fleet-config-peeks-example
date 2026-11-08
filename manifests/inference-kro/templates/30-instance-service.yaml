@@ -16,8 +16,6 @@ spec:
     weightsPrefix: mistral-7b-instruct-v0.3
     maxModelLen: 8192
     maxNumSeqs: 4
-  image:
-    digest: {{ .Values.service.imageDigest }}
   placement:
     zones: ["{{ .Values.env.region }}{{ .Values.service.zoneSuffix }}"]
   floor:

@@ -15,12 +15,13 @@ spec:
     vpcID: {{ .Values.env.vpcId | quote }}
     subnetIDs: {{ splitList "," .Values.env.privateSubnetIds | toJson }}
     securityGroupID: {{ .Values.env.clusterSecurityGroupId | quote }}
-  repository:
-    name: vllm
   weights:
-    prefix: mistral-7b-instruct-v0.3
+    prefix: {{ .Values.accel.weights.prefix }}
+    huggingFace: {{ .Values.accel.weights.huggingFace | toJson }}
+  image:
+    tag: {{ .Values.accel.image.tag }}
   network:
     endpoints: {{ .Values.accel.endpoints | toJson }}
   serviceAccount: inference-weights-reader
-  retain: true
+  retain: {{ .Values.accel.retain }}
 {{- end }}
