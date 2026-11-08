@@ -57,7 +57,7 @@ service:
   floorReserved: false
   reservationTags:
     ai-on-eks: "true"
-  burstMaxReplicas: 2           # floor 1 + burst 2 = 3 GPU nodes at most
+  burstMaxReplicas: 3           # burst 0..3 (R2 / slide 16): floor 1 + burst 3 = 4 replicas, 4 GPU nodes at most
   burstConsolidateAfter: 10m
   cooldownPeriod: 900
   scaleDownStabilization: 900
