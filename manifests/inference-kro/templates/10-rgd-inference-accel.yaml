@@ -306,7 +306,7 @@ spec:
         backoffLimit: 6
         template:
           spec:
-            restartPolicy: OnFailure
+            restartPolicy: Never   # a failed pod is replaced: a NEW pod gets Pod Identity credentials
             serviceAccountName: ${seedSa.metadata.name}
             containers:
             - name: seed
@@ -314,6 +314,7 @@ spec:
               command: ["/bin/bash", "-euo", "pipefail", "-c"]
               args:
               - |
+                aws sts get-caller-identity >/dev/null   # no credentials yet (Pod Identity not effective): fail, a new pod retries
                 BASE="https://huggingface.co/$REPO/resolve/$REV"
                 for f in $FILES; do
                   key="$PREFIX/$f"
@@ -337,10 +338,12 @@ spec:
                 requests: {cpu: 500m, memory: 1Gi}
                 limits: {memory: 2Gi}
 
-  # Image: asking the registry for the tag with an import-capable identity
-  # makes the pull-through cache create the repository and import the image;
-  # the Job waits until it is described. Kubelet (pull-only node role) then
-  # finds it in the private registry.
+  # Image: a pull-through cache imports an image only when a client really
+  # pulls its layers (a manifest or BatchGetImage call alone imports nothing:
+  # measured). The Job therefore does what a container runtime does - manifest,
+  # then every layer through the registry API - with an import-capable
+  # identity, then waits for the image to be described. Kubelet (pull-only
+  # node role) later finds it in the private registry.
   - id: imageSeed
     readyWhen:
     - ${imageSeed.?status.?succeeded.orValue(0) >= 1}
@@ -355,7 +358,7 @@ spec:
         backoffLimit: 6
         template:
           spec:
-            restartPolicy: OnFailure
+            restartPolicy: Never   # a failed pod is replaced: a NEW pod gets Pod Identity credentials
             serviceAccountName: ${seedSa.metadata.name}
             containers:
             - name: seed
@@ -363,11 +366,19 @@ spec:
               command: ["/bin/bash", "-euo", "pipefail", "-c"]
               args:
               - |
-                for i in $(seq 1 120); do
-                  if aws ecr describe-images --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" >/dev/null 2>&1; then echo "image present"; exit 0; fi
-                  aws ecr batch-get-image --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" --accepted-media-types application/vnd.docker.distribution.manifest.v2+json application/vnd.oci.image.manifest.v1+json >/dev/null 2>&1 || true
-                  echo "waiting for import ($i)"; sleep 10
+                aws sts get-caller-identity >/dev/null   # no credentials yet (Pod Identity not effective): fail, a new pod retries
+                ACC=$(aws sts get-caller-identity --query Account --output text)
+                HOST="$ACC.dkr.ecr.$AWS_REGION.amazonaws.com"
+                present() { aws ecr describe-images --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" >/dev/null 2>&1; }
+                if present; then echo "image present"; exit 0; fi
+                TOK=$(aws ecr get-authorization-token --query 'authorizationData[0].authorizationToken' --output text)
+                curl -sf -o /tmp/manifest -H "Authorization: Basic $TOK" -H "Accept: application/vnd.docker.distribution.manifest.v2+json" "https://$HOST/v2/$REPOSITORY/manifests/$TAG"
+                for d in $(grep -o 'sha256:[a-f0-9]*' /tmp/manifest | sort -u); do
+                  curl -sfL -o /dev/null -H "Authorization: Basic $TOK" "https://$HOST/v2/$REPOSITORY/blobs/$d" &
+                  while [ "$(jobs -r | wc -l)" -ge 6 ]; do sleep 1; done
                 done
+                wait
+                for i in $(seq 1 30); do if present; then echo "image imported"; exit 0; fi; sleep 10; done
                 echo "image not imported"; exit 1
               env:
               - {name: REPOSITORY, value: '${schema.spec.image.pullThroughPrefix + "/" + schema.spec.image.upstreamRepository}'}
