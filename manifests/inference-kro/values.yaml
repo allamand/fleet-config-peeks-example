@@ -52,9 +52,9 @@ service:
   enabled: true
   zoneSuffix: b                 # GPU zone: where the g6 capacity and the ODCR are
   # 0 at rest (no GPU node). Set to 1 before a rehearsal or the demo.
-  floorReplicas: 0
+  floorReplicas: 1
   # true only once the ODCR is free (old floor gone): floor on the reservation.
-  floorReserved: false
+  floorReserved: true
   reservationTags:
     ai-on-eks: "true"
   burstMaxReplicas: 3           # burst 0..3 (R2 / slide 16): floor 1 + burst 3 = 4 replicas, 4 GPU nodes at most
