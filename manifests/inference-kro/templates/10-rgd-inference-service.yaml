@@ -282,7 +282,7 @@ spec:
               prometheus.io/path: /metrics
               karpenter.sh/do-not-disrupt: "true"
           spec:
-            serviceAccountName: ${accel.status.serviceAccount}
+            serviceAccountName: ${accel.?status.?serviceAccount.orValue("")}
             terminationGracePeriodSeconds: 60
             affinity:
               nodeAffinity:
@@ -305,10 +305,10 @@ spec:
               effect: NoSchedule
             containers:
             - name: vllm
-              image: ${accel.status.imageURI}
+              image: ${accel.?status.?imageURI.orValue("")}
               imagePullPolicy: IfNotPresent
               command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]   # same entrypoint for the upstream vllm-openai and the AWS DLC images
-              args: '${["--model", "s3://" + accel.status.bucketName + "/" + schema.spec.model.weightsPrefix + "/", "--load-format", "runai_streamer", "--model-loader-extra-config", "{\"concurrency\":" + string(schema.spec.model.streamerConcurrency) + "}", "--served-model-name", schema.spec.model.name, "--host", "0.0.0.0", "--port", "8000", "--max-model-len", string(schema.spec.model.maxModelLen), "--max-num-seqs", string(schema.spec.model.maxNumSeqs), "--gpu-memory-utilization", schema.spec.model.gpuMemoryUtilization, "--tensor-parallel-size", string(schema.spec.model.tensorParallelSize), "--enable-prefix-caching", "--disable-log-requests"] + (schema.spec.floor.enforceEager ? ["--enforce-eager"] : []) + schema.spec.model.?extraArgs.orValue([])}'
+              args: '${["--model", "s3://" + accel.?status.?bucketName.orValue("") + "/" + schema.spec.model.weightsPrefix + "/", "--load-format", "runai_streamer", "--model-loader-extra-config", "{\"concurrency\":" + string(schema.spec.model.streamerConcurrency) + "}", "--served-model-name", schema.spec.model.name, "--host", "0.0.0.0", "--port", "8000", "--max-model-len", string(schema.spec.model.maxModelLen), "--max-num-seqs", string(schema.spec.model.maxNumSeqs), "--gpu-memory-utilization", schema.spec.model.gpuMemoryUtilization, "--tensor-parallel-size", string(schema.spec.model.tensorParallelSize), "--enable-prefix-caching", "--disable-log-requests"] + (schema.spec.floor.enforceEager ? ["--enforce-eager"] : []) + schema.spec.model.?extraArgs.orValue([])}'
               env:
               - name: HF_HOME
                 value: /cache/huggingface
@@ -385,7 +385,7 @@ spec:
               prometheus.io/port: "8000"
               prometheus.io/path: /metrics
           spec:
-            serviceAccountName: ${accel.status.serviceAccount}
+            serviceAccountName: ${accel.?status.?serviceAccount.orValue("")}
             terminationGracePeriodSeconds: 60
             affinity:
               nodeAffinity:
@@ -414,10 +414,10 @@ spec:
               effect: NoSchedule
             containers:
             - name: vllm
-              image: ${accel.status.imageURI}
+              image: ${accel.?status.?imageURI.orValue("")}
               imagePullPolicy: IfNotPresent
               command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]   # same entrypoint for the upstream vllm-openai and the AWS DLC images
-              args: '${["--model", "s3://" + accel.status.bucketName + "/" + schema.spec.model.weightsPrefix + "/", "--load-format", "runai_streamer", "--model-loader-extra-config", "{\"concurrency\":" + string(schema.spec.model.streamerConcurrency) + "}", "--served-model-name", schema.spec.model.name, "--host", "0.0.0.0", "--port", "8000", "--max-model-len", string(schema.spec.model.maxModelLen), "--max-num-seqs", string(schema.spec.model.maxNumSeqs), "--gpu-memory-utilization", schema.spec.model.gpuMemoryUtilization, "--tensor-parallel-size", string(schema.spec.model.tensorParallelSize), "--enable-prefix-caching", "--disable-log-requests"] + (schema.spec.burst.enforceEager ? ["--enforce-eager"] : []) + schema.spec.model.?extraArgs.orValue([])}'
+              args: '${["--model", "s3://" + accel.?status.?bucketName.orValue("") + "/" + schema.spec.model.weightsPrefix + "/", "--load-format", "runai_streamer", "--model-loader-extra-config", "{\"concurrency\":" + string(schema.spec.model.streamerConcurrency) + "}", "--served-model-name", schema.spec.model.name, "--host", "0.0.0.0", "--port", "8000", "--max-model-len", string(schema.spec.model.maxModelLen), "--max-num-seqs", string(schema.spec.model.maxNumSeqs), "--gpu-memory-utilization", schema.spec.model.gpuMemoryUtilization, "--tensor-parallel-size", string(schema.spec.model.tensorParallelSize), "--enable-prefix-caching", "--disable-log-requests"] + (schema.spec.burst.enforceEager ? ["--enforce-eager"] : []) + schema.spec.model.?extraArgs.orValue([])}'
               env:
               - name: HF_HOME
                 value: /cache/huggingface
