@@ -301,7 +301,7 @@ spec:
       metadata:
         name: ${schema.metadata.name}-weights-seed
         annotations:
-          kro.run/after: ${seedPia.metadata.name}
+          peeks.io/after: ${seedPia.metadata.name}
       spec:
         backoffLimit: 6
         template:
@@ -350,7 +350,7 @@ spec:
       metadata:
         name: ${schema.metadata.name}-image-seed
         annotations:
-          kro.run/after: ${seedPia.metadata.name}
+          peeks.io/after: ${seedPia.metadata.name}
       spec:
         backoffLimit: 6
         template:
