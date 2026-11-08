@@ -150,6 +150,34 @@ spec:
         - '0.90'
         - --enable-prefix-caching
         - --disable-log-requests
+        # ═══════════════════════════════════════════════════════════════════
+        # 🩹 --enforce-eager SUR LE SEUL DÉBORDEMENT — 2026-11-08
+        #
+        # POURQUOI ICI ET PAS SUR LE PLANCHER. Le ScaledObject ne cible que
+        # `vllm-mistral-burst`. Depuis la scission du commit `a67393c`, les deux
+        # rôles ont des manifestes distincts : on peut donc arbitrer séparément.
+        # Le plancher GARDE ses CUDA graphs et son débit nominal — c'est lui qui
+        # porte la démonstration de performance. La réplique de débordement,
+        # dont le rôle est d'exister vite et de servir quelques requêtes à
+        # l'écran, échange du débit contre du temps de démarrage.
+        #
+        # CE QUE CELA DOIT FAIRE GAGNER, ET LA BORNE HONNÊTE. Mesuré le 07/11
+        # sur un nœud de débordement neuf : `torch.compile` 22,03 s et capture
+        # CUDA 1 s, dans un `init engine` de 26,58 s.
+        #   · si `--enforce-eager` désactive AUSSI la compilation -> −23 s
+        #   · s'il ne désactive que la capture des graphes        -> −1 s
+        # En vLLM V1, `enforce_eager` est censé ramener la configuration de
+        # compilation à « aucune compilation », donc le premier cas. MAIS CE
+        # N'EST PAS VÉRIFIÉ sur notre version 0.10.2. Le test de deux passages
+        # tranche ; ne rien annoncer avant.
+        #
+        # LA CONTREPARTIE, documentée par AWS : −5 à −30 % de débit en régime
+        # établi et une latence par jeton plus élevée à petit batch, les CUDA
+        # graphs rejouant les lancements de kernels en un bloc. Elle ne frappe
+        # que cette réplique. Témoin de comparaison, mesuré juste avant ce
+        # commit sur le plancher : 0,913 / 0,912 / 0,912 s pour 16 jetons.
+        # ═══════════════════════════════════════════════════════════════════
+        - --enforce-eager
         ports:
         - name: http
           containerPort: 8000
