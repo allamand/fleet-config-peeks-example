@@ -20,10 +20,19 @@ spec:
     zones: ["{{ .Values.env.region }}{{ .Values.service.zoneSuffix }}"]
   floor:
     replicas: {{ .Values.service.floorReplicas }}
-    # On-demand until phase 4: the single ODCR slot is held by the old floor.
-    # g6.2xlarge on-demand is often ICE in this zone, hence the larger sizes.
+{{- if .Values.service.floorReserved }}
+    # Floor on the ODCR, selected by tag (never by ID). A NodeClass that
+    # declares reservation terms changes ODCR usage for the whole Auto Mode
+    # cluster: only enable once the old floor has released the reservation.
+    capacityTypes: ["reserved", "on-demand"]
+    reservationTags: {{ .Values.service.reservationTags | toJson }}
+    instanceTypes: ["g6.2xlarge"]
+{{- else }}
+    # On-demand while the ODCR slot is held elsewhere. g6.2xlarge on-demand is
+    # often ICE in this zone, hence the larger sizes.
     capacityTypes: ["on-demand"]
     instanceTypes: ["g6.2xlarge", "g6.4xlarge", "g6.8xlarge"]
+{{- end }}
     maxNodes: 1
   burst:
     enabled: true
