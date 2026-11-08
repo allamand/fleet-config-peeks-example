@@ -2877,10 +2877,44 @@ platform-manifests-bootstrap:
                   # (Abaisser les requests pour l'y faire entrer serait un
                   # autre levier, et il dégraderait le plancher aussi, puisque
                   # les deux Deployments partagent ces valeurs.)
+                  #
+                  # ═════════════════════════════════════════════════════════
+                  # 🩹 g6.2xlarge RETIRÉ À SON TOUR — 2026-11-08
+                  #     Décision de Sébastien, sur mesure du coût réel.
+                  #
+                  # CE QUI A CHANGÉ DEPUIS L'ÉLARGISSEMENT. Le commentaire
+                  # ci-dessus dit « élargir ne dégrade pas la démonstration »,
+                  # au motif que la VRAM est identique partout. C'est vrai pour
+                  # la capacité à charger le modèle, et FAUX pour le temps de
+                  # démarrage. Le tirage de l'image se décompresse en parallèle
+                  # sur les vCPU, donc il dépend directement de la taille :
+                  #
+                  #   g6.16xlarge  64 vCPU   -> non mesuré, attendu < 32 s
+                  #   g6.8xlarge   32 vCPU   ->  32,5 s   [mesuré 08/11]
+                  #   g6.4xlarge   16 vCPU   ->  52,5 s   [mesuré 08/11, 2 nœuds]
+                  #   g6.2xlarge    8 vCPU   -> 149    s   [mesuré 07/11]
+                  #
+                  # Karpenter retient l'offre la MOINS CHÈRE compatible, donc
+                  # laisser `g6.2xlarge` dans la liste, c'est accepter un
+                  # démarrage à froid de ~308 s au lieu de ~190 s si elle sort
+                  # au tirage. Ce n'est pas un risque théorique : au test du
+                  # 08/11, DEUX des trois nœuds étaient des `4xlarge` et ont
+                  # payé +20 s chacun.
+                  #
+                  # ⛔ POURQUOI g6.12xlarge N'EST PAS AJOUTÉ, malgré ses
+                  # 48 vCPU. Relevé par l'API EC2 et par l'API de tarification,
+                  # pas supposé : elle porte **4 GPU L4** et coûte
+                  # **5,8412 USD/h**, contre **4,3118 USD/h** pour la
+                  # `g6.16xlarge` qui n'en porte qu'UN et offre **64 vCPU**.
+                  # Pour un pod qui demande 1 GPU, la 12xlarge est donc
+                  # strictement dominée sur les trois axes qui comptent : plus
+                  # chère, moins de vCPU donc plus lente sur l'image, et 3 GPU
+                  # gaspillés sur 4. Elle reste réservée au pool `sharded`, qui
+                  # l'utilise pour de vrai en tensor-parallel 4.
                   # ═════════════════════════════════════════════════════════
                   - key: "node.kubernetes.io/instance-type"
                     operator: In
-                    values: ["g6.2xlarge", "g6.4xlarge", "g6.8xlarge", "g6.16xlarge"]
+                    values: ["g6.4xlarge", "g6.8xlarge", "g6.16xlarge"]
                   # ═════════════════════════════════════════════════════════
                   # LA ZONE RESTE eu-west-3b SEULE, et ce n'est pas un oubli.
                   #
