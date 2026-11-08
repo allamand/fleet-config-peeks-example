@@ -1,0 +1,537 @@
+# RGD B - InferenceService
+# Serving layer of an inference tenant on EKS Auto Mode: GPU NodeClass, floor
+# and burst NodePools, floor and burst vLLM Deployments, Service, and the KEDA
+# TriggerAuthentication + ScaledObject that scale the burst tier from the
+# queue depth read in Amazon Managed Prometheus.
+#
+# Nothing environment-specific is written here:
+#   - node role, subnets, security groups: copied from the Auto Mode NodeClass
+#     "default" (externalRef);
+#   - weights bucket and ServiceAccount: from the InferenceAccel instance status
+#     (externalRef);
+#   - image repository URI: from the InferenceAccel instance status;
+#   - AMP workspace id: from the platform workspace CR status (externalRef);
+#   - region: spec field filled from the cluster-secret annotation aws_region.
+#
+# Isolation: nodes carry the label and taint inference.kro.run/instance=<name>,
+# so pods of other workloads never land on them and these pods never land on
+# other GPU pools.
+#
+# The burst Deployment template has NO spec.replicas: KEDA (through its HPA)
+# owns that field. Requires kro server-side apply semantics (verified in test).
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: inferenceservice.kro.run
+spec:
+  schema:
+    apiVersion: v1alpha1
+    group: kro.run
+    kind: InferenceService
+    scope: Namespaced
+    spec:
+      aws:
+        region: string                       # cluster-secret aws_region
+      accelRef: string                       # InferenceAccel instance (same namespace)
+      model:
+        name: string                         # --served-model-name
+        weightsPrefix: string                # prefix in the InferenceAccel bucket
+        maxModelLen: integer | default=8192
+        maxNumSeqs: integer | default=4
+        gpuMemoryUtilization: string | default="0.90"
+        tensorParallelSize: integer | default=1
+        streamerConcurrency: integer | default=4
+        extraArgs: "[]string"
+      image:
+        digest: string | pattern="^sha256:[a-f0-9]{64}$"   # immutable digest, tags refused
+      resources:
+        cpu: string | default="4"
+        memory: string | default="16Gi"
+        memoryLimit: string | default="24Gi"
+      placement:
+        zones: "[]string"                    # topology.kubernetes.io/zone values
+      nodeClass:
+        ephemeralStorageGi: integer | default=100
+        iops: integer | default=3000
+        throughput: integer | default=125
+      floor:
+        replicas: integer | default=1
+        capacityTypes: "[]string"            # e.g. [reserved, on-demand] ; never spot
+        instanceTypes: "[]string"
+        maxNodes: integer | default=1
+        reservationTags: "map[string]string" # ODCR selection by tags; empty = no ODCR terms at all
+        enforceEager: boolean | default=false  # floor keeps torch.compile / CUDA graphs (steady-state speed)
+      burst:
+        enabled: boolean | default=true
+        minReplicas: integer | default=0
+        maxReplicas: integer | default=3
+        capacityTypes: "[]string"            # e.g. [spot, on-demand]
+        instanceTypes: "[]string"
+        maxNodes: integer | default=3
+        consolidateAfter: string | default="10m"
+        enforceEager: boolean | default=true   # burst skips torch.compile (~25 s faster cold start)
+      scaling:
+        ampWorkspaceRef: string              # platform workspace CR (amp.aws.upbound.io)
+        query: string | default=""           # empty = queue depth of THIS namespace only
+        namespaceLabel: string | default="kubernetes_namespace"
+        threshold: string | default="2"
+        activationThreshold: string | default="1"
+        pollingInterval: integer | default=15
+        cooldownPeriod: integer | default=900
+        scaleDownStabilization: integer | default=900
+        scaleUpPods: integer | default=2
+    status:
+      endpoint: ${"http://" + svc.metadata.name + "." + schema.metadata.namespace + ".svc:8000"}
+      nodeClass: ${schema.metadata.name + "-gpu"}
+      floorReadyReplicas: ${floor.?status.?readyReplicas.orValue(0)}
+      burstReplicas: ${burst.?status.?replicas.orValue(0)}
+      scaledObjectReady: ${scaledObject.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+  resources:
+  # ---- read-only references ------------------------------------------------
+  - id: defaultNodeClass
+    externalRef:
+      apiVersion: eks.amazonaws.com/v1
+      kind: NodeClass
+      metadata:
+        name: default
+  - id: accel
+    externalRef:
+      apiVersion: kro.run/v1alpha1
+      kind: InferenceAccel
+      metadata:
+        name: ${schema.spec.accelRef}
+        namespace: ${schema.metadata.namespace}
+  - id: amp
+    externalRef:
+      apiVersion: amp.aws.upbound.io/v1beta2
+      kind: Workspace
+      metadata:
+        name: ${schema.spec.scaling.ampWorkspaceRef}
+
+  # ---- capacity ------------------------------------------------------------
+  # Two mutually exclusive variants of the same NodeClass: a NodeClass that
+  # declares capacityReservationSelectorTerms changes ODCR usage for the whole
+  # Auto Mode cluster, so the field is only emitted when tags are given.
+  - id: nodeClass
+    includeWhen:
+    - ${size(schema.spec.floor.?reservationTags.orValue({})) == 0}
+    readyWhen:
+    - ${nodeClass.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+    template:
+      apiVersion: eks.amazonaws.com/v1
+      kind: NodeClass
+      metadata:
+        name: ${schema.metadata.name}-gpu
+      spec:
+        role: ${defaultNodeClass.spec.role}
+        subnetSelectorTerms: ${defaultNodeClass.spec.subnetSelectorTerms}
+        securityGroupSelectorTerms: ${defaultNodeClass.spec.securityGroupSelectorTerms}
+        ephemeralStorage:
+          size: ${string(schema.spec.nodeClass.ephemeralStorageGi) + "Gi"}
+          iops: ${schema.spec.nodeClass.iops}
+          throughput: ${schema.spec.nodeClass.throughput}
+  - id: nodeClassReserved
+    includeWhen:
+    - ${size(schema.spec.floor.?reservationTags.orValue({})) > 0}
+    readyWhen:
+    - ${nodeClassReserved.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+    template:
+      apiVersion: eks.amazonaws.com/v1
+      kind: NodeClass
+      metadata:
+        name: ${schema.metadata.name}-gpu
+      spec:
+        role: ${defaultNodeClass.spec.role}
+        subnetSelectorTerms: ${defaultNodeClass.spec.subnetSelectorTerms}
+        securityGroupSelectorTerms: ${defaultNodeClass.spec.securityGroupSelectorTerms}
+        capacityReservationSelectorTerms:
+        - tags: ${schema.spec.floor.reservationTags}
+        ephemeralStorage:
+          size: ${string(schema.spec.nodeClass.ephemeralStorageGi) + "Gi"}
+          iops: ${schema.spec.nodeClass.iops}
+          throughput: ${schema.spec.nodeClass.throughput}
+
+  - id: poolFloor
+    template:
+      apiVersion: karpenter.sh/v1
+      kind: NodePool
+      metadata:
+        name: ${schema.metadata.name}-floor
+      spec:
+        weight: 100
+        limits:
+          nodes: ${schema.spec.floor.maxNodes}
+        disruption:
+          consolidationPolicy: WhenEmpty
+          consolidateAfter: Never
+          budgets:
+          - nodes: "1"
+        template:
+          metadata:
+            labels:
+              inference.kro.run/instance: ${schema.metadata.name}
+              inference.kro.run/tier: floor
+              inference-tier: floor          # same label as the demo script reads
+          spec:
+            nodeClassRef:
+              group: eks.amazonaws.com
+              kind: NodeClass
+              name: ${schema.metadata.name}-gpu
+            expireAfter: 336h
+            terminationGracePeriod: 1h
+            taints:
+            - key: nvidia.com/gpu
+              effect: NoSchedule
+            - key: inference.kro.run/instance
+              value: ${schema.metadata.name}
+              effect: NoSchedule
+            requirements:
+            - key: karpenter.sh/capacity-type
+              operator: In
+              values: ${schema.spec.floor.capacityTypes.filter(t, t != "spot")}   # spot never allowed on the floor
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values: ${schema.spec.floor.instanceTypes}
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ${schema.spec.placement.zones}
+            - key: kubernetes.io/arch
+              operator: In
+              values: ["amd64"]
+
+  - id: poolBurst
+    includeWhen:
+    - ${schema.spec.burst.enabled}
+    template:
+      apiVersion: karpenter.sh/v1
+      kind: NodePool
+      metadata:
+        name: ${schema.metadata.name}-burst
+      spec:
+        weight: 10
+        limits:
+          nodes: ${schema.spec.burst.maxNodes}
+        disruption:
+          consolidationPolicy: WhenEmpty
+          consolidateAfter: ${schema.spec.burst.consolidateAfter}
+          budgets:
+          - nodes: "1"
+        template:
+          metadata:
+            labels:
+              inference.kro.run/instance: ${schema.metadata.name}
+              inference.kro.run/tier: burst
+              inference-tier: burst          # same label as the demo script reads
+          spec:
+            nodeClassRef:
+              group: eks.amazonaws.com
+              kind: NodeClass
+              name: ${schema.metadata.name}-gpu
+            expireAfter: 336h
+            terminationGracePeriod: 1h
+            taints:
+            - key: nvidia.com/gpu
+              effect: NoSchedule
+            - key: inference.kro.run/instance
+              value: ${schema.metadata.name}
+              effect: NoSchedule
+            requirements:
+            - key: karpenter.sh/capacity-type
+              operator: In
+              values: ${schema.spec.burst.capacityTypes}
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values: ${schema.spec.burst.instanceTypes}
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ${schema.spec.placement.zones}
+            - key: kubernetes.io/arch
+              operator: In
+              values: ["amd64"]
+
+  # ---- serving -------------------------------------------------------------
+  - id: floor
+    readyWhen:
+    - ${floor.?status.?readyReplicas.orValue(0) >= floor.spec.replicas}
+    template:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ${schema.metadata.name}-floor
+        labels:
+          app.kubernetes.io/name: ${schema.metadata.name}
+          inference.kro.run/tier: floor
+      spec:
+        replicas: ${schema.spec.floor.replicas}
+        strategy:
+          type: Recreate
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: ${schema.metadata.name}
+            inference.kro.run/tier: floor
+        template:
+          metadata:
+            labels:
+              app.kubernetes.io/name: ${schema.metadata.name}
+              inference.kro.run/tier: floor
+            annotations:
+              prometheus.io/scrape: "true"
+              prometheus.io/port: "8000"
+              prometheus.io/path: /metrics
+              karpenter.sh/do-not-disrupt: "true"
+          spec:
+            serviceAccountName: ${accel.status.serviceAccount}
+            terminationGracePeriodSeconds: 60
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: inference.kro.run/instance
+                      operator: In
+                      values: ["${schema.metadata.name}"]
+                    - key: inference.kro.run/tier
+                      operator: In
+                      values: ["floor"]
+            tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+            - key: inference.kro.run/instance
+              operator: Equal
+              value: ${schema.metadata.name}
+              effect: NoSchedule
+            containers:
+            - name: vllm
+              image: ${accel.status.repositoryURI + "@" + schema.spec.image.digest}
+              imagePullPolicy: IfNotPresent
+              args: '${["--model", "s3://" + accel.status.bucketName + "/" + schema.spec.model.weightsPrefix + "/", "--load-format", "runai_streamer", "--model-loader-extra-config", "{\"concurrency\":" + string(schema.spec.model.streamerConcurrency) + "}", "--served-model-name", schema.spec.model.name, "--host", "0.0.0.0", "--port", "8000", "--max-model-len", string(schema.spec.model.maxModelLen), "--max-num-seqs", string(schema.spec.model.maxNumSeqs), "--gpu-memory-utilization", schema.spec.model.gpuMemoryUtilization, "--tensor-parallel-size", string(schema.spec.model.tensorParallelSize), "--enable-prefix-caching", "--disable-log-requests"] + (schema.spec.floor.enforceEager ? ["--enforce-eager"] : []) + schema.spec.model.?extraArgs.orValue([])}'
+              env:
+              - name: HF_HOME
+                value: /cache/huggingface
+              - name: RUNAI_STREAMER_CHUNK_BYTESIZE
+                value: "4294967296"
+              - name: RUNAI_STREAMER_S3_REQUEST_TIMEOUT_MS
+                value: "3000"
+              - name: RUNAI_STREAMER_S3_LOW_SPEED_LIMIT
+                value: "1048576"
+              - name: AWS_REGION
+                value: ${schema.spec.aws.region}
+              - name: AWS_DEFAULT_REGION
+                value: ${schema.spec.aws.region}
+              ports:
+              - name: http
+                containerPort: 8000
+              startupProbe:
+                httpGet: {path: /health, port: http}
+                periodSeconds: 10
+                timeoutSeconds: 5
+                failureThreshold: 150
+              readinessProbe:
+                httpGet: {path: /health, port: http}
+                periodSeconds: 10
+                timeoutSeconds: 5
+              livenessProbe:
+                httpGet: {path: /health, port: http}
+                periodSeconds: 30
+                timeoutSeconds: 10
+                failureThreshold: 5
+              resources:
+                requests:
+                  cpu: ${schema.spec.resources.cpu}
+                  memory: ${schema.spec.resources.memory}
+                  nvidia.com/gpu: ${string(schema.spec.model.tensorParallelSize)}
+                limits:
+                  memory: ${schema.spec.resources.memoryLimit}
+                  nvidia.com/gpu: ${string(schema.spec.model.tensorParallelSize)}
+              volumeMounts:
+              - {name: cache, mountPath: /cache}
+              - {name: shm, mountPath: /dev/shm}
+            volumes:
+            - name: cache
+              emptyDir: {sizeLimit: 60Gi}
+            - name: shm
+              emptyDir: {medium: Memory, sizeLimit: 8Gi}
+
+  - id: burst
+    includeWhen:
+    - ${schema.spec.burst.enabled}
+    template:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ${schema.metadata.name}-burst
+        labels:
+          app.kubernetes.io/name: ${schema.metadata.name}
+          inference.kro.run/tier: burst
+      spec:
+        # no replicas: owned by KEDA / HPA
+        strategy:
+          type: Recreate
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: ${schema.metadata.name}
+            inference.kro.run/tier: burst
+        template:
+          metadata:
+            labels:
+              app.kubernetes.io/name: ${schema.metadata.name}
+              inference.kro.run/tier: burst
+            annotations:
+              prometheus.io/scrape: "true"
+              prometheus.io/port: "8000"
+              prometheus.io/path: /metrics
+          spec:
+            serviceAccountName: ${accel.status.serviceAccount}
+            terminationGracePeriodSeconds: 60
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: inference.kro.run/instance
+                      operator: In
+                      values: ["${schema.metadata.name}"]
+                    - key: inference.kro.run/tier
+                      operator: In
+                      values: ["burst"]
+              podAntiAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: ${schema.metadata.name}
+            tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+            - key: inference.kro.run/instance
+              operator: Equal
+              value: ${schema.metadata.name}
+              effect: NoSchedule
+            containers:
+            - name: vllm
+              image: ${accel.status.repositoryURI + "@" + schema.spec.image.digest}
+              imagePullPolicy: IfNotPresent
+              args: '${["--model", "s3://" + accel.status.bucketName + "/" + schema.spec.model.weightsPrefix + "/", "--load-format", "runai_streamer", "--model-loader-extra-config", "{\"concurrency\":" + string(schema.spec.model.streamerConcurrency) + "}", "--served-model-name", schema.spec.model.name, "--host", "0.0.0.0", "--port", "8000", "--max-model-len", string(schema.spec.model.maxModelLen), "--max-num-seqs", string(schema.spec.model.maxNumSeqs), "--gpu-memory-utilization", schema.spec.model.gpuMemoryUtilization, "--tensor-parallel-size", string(schema.spec.model.tensorParallelSize), "--enable-prefix-caching", "--disable-log-requests"] + (schema.spec.burst.enforceEager ? ["--enforce-eager"] : []) + schema.spec.model.?extraArgs.orValue([])}'
+              env:
+              - name: HF_HOME
+                value: /cache/huggingface
+              - name: RUNAI_STREAMER_CHUNK_BYTESIZE
+                value: "4294967296"
+              - name: RUNAI_STREAMER_S3_REQUEST_TIMEOUT_MS
+                value: "3000"
+              - name: RUNAI_STREAMER_S3_LOW_SPEED_LIMIT
+                value: "1048576"
+              - name: AWS_REGION
+                value: ${schema.spec.aws.region}
+              - name: AWS_DEFAULT_REGION
+                value: ${schema.spec.aws.region}
+              ports:
+              - name: http
+                containerPort: 8000
+              startupProbe:
+                httpGet: {path: /health, port: http}
+                periodSeconds: 10
+                timeoutSeconds: 5
+                failureThreshold: 150
+              readinessProbe:
+                httpGet: {path: /health, port: http}
+                periodSeconds: 10
+                timeoutSeconds: 5
+              livenessProbe:
+                httpGet: {path: /health, port: http}
+                periodSeconds: 30
+                timeoutSeconds: 10
+                failureThreshold: 5
+              resources:
+                requests:
+                  cpu: ${schema.spec.resources.cpu}
+                  memory: ${schema.spec.resources.memory}
+                  nvidia.com/gpu: ${string(schema.spec.model.tensorParallelSize)}
+                limits:
+                  memory: ${schema.spec.resources.memoryLimit}
+                  nvidia.com/gpu: ${string(schema.spec.model.tensorParallelSize)}
+              volumeMounts:
+              - {name: cache, mountPath: /cache}
+              - {name: shm, mountPath: /dev/shm}
+            volumes:
+            - name: cache
+              emptyDir: {sizeLimit: 60Gi}
+            - name: shm
+              emptyDir: {medium: Memory, sizeLimit: 8Gi}
+
+  - id: svc
+    template:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ${schema.metadata.name}
+      spec:
+        selector:
+          app.kubernetes.io/name: ${schema.metadata.name}
+        ports:
+        - name: http
+          port: 8000
+          targetPort: http
+
+  # ---- autoscaling ---------------------------------------------------------
+  - id: triggerAuth
+    includeWhen:
+    - ${schema.spec.burst.enabled}
+    template:
+      apiVersion: keda.sh/v1alpha1
+      kind: TriggerAuthentication
+      metadata:
+        name: ${schema.metadata.name}-amp
+      spec:
+        podIdentity:
+          provider: aws          # KEDA operator identity (see AmpReader)
+
+  - id: scaledObject
+    includeWhen:
+    - ${schema.spec.burst.enabled}
+    readyWhen:
+    - ${scaledObject.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+    template:
+      apiVersion: keda.sh/v1alpha1
+      kind: ScaledObject
+      metadata:
+        name: ${schema.metadata.name}
+      spec:
+        scaleTargetRef:
+          apiVersion: apps/v1
+          kind: Deployment
+          name: ${burst.metadata.name}
+        minReplicaCount: ${schema.spec.burst.minReplicas}
+        maxReplicaCount: ${schema.spec.burst.maxReplicas}
+        pollingInterval: ${schema.spec.scaling.pollingInterval}
+        cooldownPeriod: ${schema.spec.scaling.cooldownPeriod}
+        advanced:
+          restoreToOriginalReplicaCount: false
+          horizontalPodAutoscalerConfig:
+            behavior:
+              scaleUp:
+                stabilizationWindowSeconds: 0
+                policies:
+                - type: Pods
+                  value: ${schema.spec.scaling.scaleUpPods}
+                  periodSeconds: 30
+              scaleDown:
+                stabilizationWindowSeconds: ${schema.spec.scaling.scaleDownStabilization}
+                policies:
+                - type: Pods
+                  value: 1
+                  periodSeconds: 60
+        triggers:
+        - type: prometheus
+          metricType: AverageValue
+          authenticationRef:
+            name: ${triggerAuth.metadata.name}
+          metadata:
+            serverAddress: ${"https://aps-workspaces." + schema.spec.aws.region + ".amazonaws.com/workspaces/" + amp.status.atProvider.id}
+            awsRegion: ${schema.spec.aws.region}
+            query: '${schema.spec.scaling.query != "" ? schema.spec.scaling.query : "sum(vllm:num_requests_waiting{" + schema.spec.scaling.namespaceLabel + "=\"" + schema.metadata.namespace + "\"})"}'
+            threshold: ${schema.spec.scaling.threshold}
+            activationThreshold: ${schema.spec.scaling.activationThreshold}
+            ignoreNullValues: "true"

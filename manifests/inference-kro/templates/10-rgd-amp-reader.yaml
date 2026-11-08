@@ -1,0 +1,86 @@
+# RGD C - AmpReader
+# Generic read-only access to one Amazon Managed Prometheus workspace for one
+# (namespace, ServiceAccount) pair: IAM role (ACK) + Pod Identity association.
+# Instantiate once per consumer (KEDA operator, Grafana, ...).
+#
+# The workspace is read through externalRef on the platform's existing
+# workspace CR (never created here). Its ARN comes from that CR's status.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: ampreader.kro.run
+spec:
+  schema:
+    apiVersion: v1alpha1
+    group: kro.run
+    kind: AmpReader
+    scope: Namespaced
+    spec:
+      aws:
+        region: string                      # cluster-secret aws_region
+        clusterName: string                 # cluster-secret aws_cluster_name
+      ampWorkspaceRef: string               # name of the platform workspace CR (amp.aws.upbound.io)
+      target:
+        namespace: string                   # namespace of the consumer ServiceAccount
+        serviceAccount: string              # consumer ServiceAccount (must not already have a PIA)
+        createServiceAccount: boolean | default=false
+      retain: boolean | default=true
+    status:
+      roleArn: ${role.status.ackResourceMetadata.arn}
+      workspaceId: ${amp.status.atProvider.id}
+      podIdentityReady: ${pia.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+  resources:
+  - id: amp
+    externalRef:
+      apiVersion: amp.aws.upbound.io/v1beta2
+      kind: Workspace
+      metadata:
+        name: ${schema.spec.ampWorkspaceRef}
+
+  - id: role
+    readyWhen:
+    - ${role.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+    template:
+      apiVersion: iam.services.k8s.aws/v1alpha1
+      kind: Role
+      metadata:
+        name: ${schema.metadata.name}-amp-reader
+        annotations:
+          services.k8s.aws/deletion-policy: '${schema.spec.retain ? "retain" : "delete"}'
+      spec:
+        name: ${schema.metadata.name}-amp-reader
+        description: Read-only query access to one AMP workspace (kro AmpReader)
+        assumeRolePolicyDocument: |
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"pods.eks.amazonaws.com"},"Action":["sts:AssumeRole","sts:TagSession"]}]}
+        inlinePolicies:
+          amp-query: |
+            {"Version":"2012-10-17","Statement":[{"Sid":"QueryOneWorkspace","Effect":"Allow","Action":["aps:QueryMetrics","aps:GetLabels","aps:GetSeries","aps:GetMetricMetadata","aps:DescribeWorkspace"],"Resource":"${amp.status.atProvider.arn}"}]}
+        tags:
+        - key: kro.run/instance
+          value: ${schema.metadata.name}
+
+  - id: sa
+    includeWhen:
+    - ${schema.spec.target.createServiceAccount}
+    template:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: ${schema.spec.target.serviceAccount}
+        namespace: ${schema.spec.target.namespace}
+
+  - id: pia
+    readyWhen:
+    - ${pia.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+    template:
+      apiVersion: eks.services.k8s.aws/v1alpha1
+      kind: PodIdentityAssociation
+      metadata:
+        name: ${schema.metadata.name}-amp-reader
+        annotations:
+          services.k8s.aws/region: ${schema.spec.aws.region}
+      spec:
+        clusterName: ${schema.spec.aws.clusterName}
+        namespace: ${schema.spec.target.namespace}
+        serviceAccount: ${schema.spec.target.serviceAccount}
+        roleARN: ${role.status.ackResourceMetadata.arn}

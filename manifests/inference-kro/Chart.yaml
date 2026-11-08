@@ -1,0 +1,10 @@
+apiVersion: v2
+name: inference-kro
+description: >-
+  Paris demo inference stack as kro ResourceGraphDefinitions (InferenceAccel,
+  InferenceService, AmpReader), their prerequisites, and the demo instances.
+  Rendered by the ApplicationSet manifests/argocd-apps/inference-kro-applicationset.yaml,
+  which injects every environment value from the Argo CD cluster-secret
+  annotations. No account, network ID or ARN is stored in this chart.
+type: application
+version: 0.1.0

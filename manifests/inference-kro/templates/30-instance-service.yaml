@@ -1,0 +1,44 @@
+{{- if .Values.service.enabled }}
+apiVersion: kro.run/v1alpha1
+kind: InferenceService
+metadata:
+  name: {{ .Values.instanceName }}
+  namespace: {{ .Values.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  aws:
+    region: {{ .Values.env.region }}
+  accelRef: {{ .Values.instanceName }}
+  model:
+    name: mistral-7b
+    weightsPrefix: mistral-7b-instruct-v0.3
+    maxModelLen: 8192
+    maxNumSeqs: 4
+  image:
+    digest: {{ .Values.service.imageDigest }}
+  placement:
+    zones: ["{{ .Values.env.region }}{{ .Values.service.zoneSuffix }}"]
+  floor:
+    replicas: {{ .Values.service.floorReplicas }}
+    # On-demand until phase 4: the single ODCR slot is held by the old floor.
+    # g6.2xlarge on-demand is often ICE in this zone, hence the larger sizes.
+    capacityTypes: ["on-demand"]
+    instanceTypes: ["g6.2xlarge", "g6.4xlarge", "g6.8xlarge"]
+    maxNodes: 1
+  burst:
+    enabled: true
+    minReplicas: 0
+    maxReplicas: {{ .Values.service.burstMaxReplicas }}
+    capacityTypes: ["spot", "on-demand"]
+    instanceTypes: ["g6.4xlarge", "g6.8xlarge", "g6.16xlarge"]
+    maxNodes: {{ .Values.service.burstMaxReplicas }}
+    consolidateAfter: {{ .Values.service.burstConsolidateAfter }}
+  scaling:
+    ampWorkspaceRef: {{ .Values.env.resourcePrefix }}-amp
+    threshold: "2"
+    activationThreshold: "1"
+    cooldownPeriod: {{ .Values.service.cooldownPeriod }}
+    scaleDownStabilization: {{ .Values.service.scaleDownStabilization }}
+{{- end }}

@@ -1,0 +1,226 @@
+# RGD A - InferenceAccel
+# AWS acceleration layer of an inference tenant: private ECR repository for the
+# serving image, private S3 bucket for the weights, optional VPC endpoints, and
+# an IAM role + Pod Identity association that lets the serving pods read the
+# weights. ACK-only (plus one ServiceAccount).
+#
+# Environment values (account, region, cluster, VPC, subnets, SG, route tables)
+# are spec fields filled at render time from the Argo CD cluster-secret
+# annotations; nothing environment-specific is written in this file.
+#
+# The ACK children live in the instance namespace: that namespace needs
+# IAMRoleSelectors for ec2/ecr/eks/iam/s3 (one per service group).
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: inferenceaccel.kro.run
+spec:
+  schema:
+    apiVersion: v1alpha1
+    group: kro.run
+    kind: InferenceAccel
+    scope: Namespaced
+    spec:
+      aws:
+        accountId: string                  # cluster-secret aws_account_id
+        region: string                     # cluster-secret aws_region
+        clusterName: string                # cluster-secret aws_cluster_name
+        vpcID: string | default=""         # cluster-secret aws_vpc_id (endpoints only)
+        subnetIDs: "[]string"              # cluster-secret aws_private_subnet_ids (endpoints only)
+        securityGroupID: string | default=""   # cluster-secret aws_cluster_security_group_id
+        routeTableIDs: "[]string"          # no annotation upstream yet (open question 4)
+      repository:
+        name: string | default="vllm"
+        scanOnPush: boolean | default=true
+        # MUTABLE by default: a multi-arch copy (buildx/crane) pushes child
+        # manifests one by one on the same tag; with IMMUTABLE the first one
+        # seals the tag and the next is refused (incident 07/11). Pin by digest
+        # in InferenceService instead.
+        tagMutability: string | default="MUTABLE" enum="MUTABLE,IMMUTABLE"
+      weights:
+        bucketSuffix: string | default="models"
+        prefix: string                     # weights prefix inside the bucket
+      network:
+        endpoints: "[]string"              # subset of ecr.api, ecr.dkr, s3 ; empty = none
+        privateDNS: boolean | default=true # false only to co-exist with endpoints already in the VPC
+      serviceAccount: string | default="inference-weights-reader"
+      retain: boolean | default=true       # ACK deletion-policy retain on data/identity
+    status:
+      repositoryURI: ${ecr.status.repositoryURI}
+      bucketName: ${bucket.spec.name}
+      weightsURI: ${"s3://" + bucket.spec.name + "/" + schema.spec.weights.prefix + "/"}
+      roleArn: ${role.status.ackResourceMetadata.arn}
+      serviceAccount: ${sa.metadata.name}
+      podIdentityReady: ${pia.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+  resources:
+  - id: ecr
+    readyWhen:
+    - ${ecr.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+    template:
+      apiVersion: ecr.services.k8s.aws/v1alpha1
+      kind: Repository
+      metadata:
+        name: ${schema.metadata.name}-${schema.spec.repository.name}
+        annotations:
+          services.k8s.aws/region: ${schema.spec.aws.region}
+          services.k8s.aws/deletion-policy: '${schema.spec.retain ? "retain" : "delete"}'
+      spec:
+        name: ${schema.metadata.name}-${schema.spec.repository.name}
+        imageTagMutability: ${schema.spec.repository.tagMutability}
+        imageScanningConfiguration:
+          scanOnPush: ${schema.spec.repository.scanOnPush}
+        encryptionConfiguration:
+          encryptionType: AES256
+        tags:
+        - key: kro.run/instance
+          value: ${schema.metadata.name}
+
+  - id: bucket
+    readyWhen:
+    - ${bucket.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+    template:
+      apiVersion: s3.services.k8s.aws/v1alpha1
+      kind: Bucket
+      metadata:
+        name: ${schema.metadata.name}-${schema.spec.weights.bucketSuffix}
+        annotations:
+          services.k8s.aws/region: ${schema.spec.aws.region}
+          services.k8s.aws/deletion-policy: '${schema.spec.retain ? "retain" : "delete"}'
+      spec:
+        # Globally unique, derived at runtime: <instance>-<account>-<region>-<suffix>
+        name: ${schema.metadata.name}-${schema.spec.aws.accountId}-${schema.spec.aws.region}-${schema.spec.weights.bucketSuffix}
+        createBucketConfiguration:
+          locationConstraint: ${schema.spec.aws.region}
+        encryption:
+          rules:
+          - applyServerSideEncryptionByDefault:
+              sseAlgorithm: AES256
+        publicAccessBlock:
+          blockPublicACLs: true
+          blockPublicPolicy: true
+          ignorePublicACLs: true
+          restrictPublicBuckets: true
+        tagging:
+          tagSet:
+          - key: kro.run/instance
+            value: ${schema.metadata.name}
+
+  - id: vpceEcrApi
+    includeWhen:
+    - ${"ecr.api" in schema.spec.network.?endpoints.orValue([])}
+    readyWhen:
+    - ${vpceEcrApi.?status.?state.orValue("") == "available"}
+    template:
+      apiVersion: ec2.services.k8s.aws/v1alpha1
+      kind: VPCEndpoint
+      metadata:
+        name: ${schema.metadata.name}-ecr-api
+        annotations:
+          services.k8s.aws/region: ${schema.spec.aws.region}
+      spec:
+        vpcEndpointType: Interface
+        vpcID: ${schema.spec.aws.vpcID}
+        serviceName: ${"com.amazonaws." + schema.spec.aws.region + ".ecr.api"}
+        subnetIDs: ${schema.spec.aws.?subnetIDs.orValue([])}
+        securityGroupIDs:
+        - ${schema.spec.aws.securityGroupID}
+        privateDNSEnabled: ${schema.spec.network.privateDNS}
+        tags:
+        - key: Name
+          value: ${schema.metadata.name}-ecr-api
+        - key: kro.run/instance
+          value: ${schema.metadata.name}
+
+  - id: vpceEcrDkr
+    includeWhen:
+    - ${"ecr.dkr" in schema.spec.network.?endpoints.orValue([])}
+    readyWhen:
+    - ${vpceEcrDkr.?status.?state.orValue("") == "available"}
+    template:
+      apiVersion: ec2.services.k8s.aws/v1alpha1
+      kind: VPCEndpoint
+      metadata:
+        name: ${schema.metadata.name}-ecr-dkr
+        annotations:
+          services.k8s.aws/region: ${schema.spec.aws.region}
+      spec:
+        vpcEndpointType: Interface
+        vpcID: ${schema.spec.aws.vpcID}
+        serviceName: ${"com.amazonaws." + schema.spec.aws.region + ".ecr.dkr"}
+        subnetIDs: ${schema.spec.aws.?subnetIDs.orValue([])}
+        securityGroupIDs:
+        - ${schema.spec.aws.securityGroupID}
+        privateDNSEnabled: ${schema.spec.network.privateDNS}
+        tags:
+        - key: Name
+          value: ${schema.metadata.name}-ecr-dkr
+        - key: kro.run/instance
+          value: ${schema.metadata.name}
+
+  - id: vpceS3
+    includeWhen:
+    - ${"s3" in schema.spec.network.?endpoints.orValue([])}
+    readyWhen:
+    - ${vpceS3.status.?state.orValue("") == "available"}
+    template:
+      apiVersion: ec2.services.k8s.aws/v1alpha1
+      kind: VPCEndpoint
+      metadata:
+        name: ${schema.metadata.name}-s3-gateway
+        annotations:
+          services.k8s.aws/region: ${schema.spec.aws.region}
+      spec:
+        vpcEndpointType: Gateway
+        vpcID: ${schema.spec.aws.vpcID}
+        serviceName: ${"com.amazonaws." + schema.spec.aws.region + ".s3"}
+        routeTableIDs: ${schema.spec.aws.?routeTableIDs.orValue([])}
+        tags:
+        - key: Name
+          value: ${schema.metadata.name}-s3-gateway
+        - key: kro.run/instance
+          value: ${schema.metadata.name}
+
+  - id: role
+    readyWhen:
+    - ${role.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+    template:
+      apiVersion: iam.services.k8s.aws/v1alpha1
+      kind: Role
+      metadata:
+        name: ${schema.metadata.name}-weights-reader
+        annotations:
+          services.k8s.aws/deletion-policy: '${schema.spec.retain ? "retain" : "delete"}'
+      spec:
+        name: ${schema.metadata.name}-weights-reader
+        description: Read-only access to the inference weights prefix (kro InferenceAccel)
+        assumeRolePolicyDocument: |
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"pods.eks.amazonaws.com"},"Action":["sts:AssumeRole","sts:TagSession"]}]}
+        inlinePolicies:
+          s3-read-weights: |
+            {"Version":"2012-10-17","Statement":[{"Sid":"ReadModelObjectsOnly","Effect":"Allow","Action":["s3:GetObject"],"Resource":"arn:aws:s3:::${bucket.spec.name}/${schema.spec.weights.prefix}/*"},{"Sid":"ListAndLocateThisBucketOnly","Effect":"Allow","Action":["s3:ListBucket","s3:GetBucketLocation"],"Resource":"arn:aws:s3:::${bucket.spec.name}"}]}
+        tags:
+        - key: kro.run/instance
+          value: ${schema.metadata.name}
+
+  - id: sa
+    template:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: ${schema.spec.serviceAccount}
+
+  - id: pia
+    readyWhen:
+    - ${pia.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
+    template:
+      apiVersion: eks.services.k8s.aws/v1alpha1
+      kind: PodIdentityAssociation
+      metadata:
+        name: ${schema.metadata.name}-weights
+        annotations:
+          services.k8s.aws/region: ${schema.spec.aws.region}
+      spec:
+        clusterName: ${schema.spec.aws.clusterName}
+        namespace: ${schema.metadata.namespace}
+        serviceAccount: ${sa.metadata.name}
+        roleARN: ${role.status.ackResourceMetadata.arn}

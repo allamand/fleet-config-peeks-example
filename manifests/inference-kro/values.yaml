@@ -1,0 +1,40 @@
+# ── Environment ───────────────────────────────────────────────────────────────
+# Injected by the ApplicationSet from the cluster-secret annotations
+# (aws_account_id, aws_region, aws_cluster_name, resource_prefix, aws_vpc_id,
+# aws_private_subnet_ids, aws_cluster_security_group_id). NEVER set here.
+env:
+  accountId: ""
+  region: ""
+  clusterName: ""
+  resourcePrefix: ""
+  vpcId: ""
+  privateSubnetIds: ""        # comma-separated, as in the annotation
+  clusterSecurityGroupId: ""
+
+namespace: inference
+
+# ── Demo instance ─────────────────────────────────────────────────────────────
+# Instance name = Service name: "mistral-7b" in "inference", as in the demo
+# script (NS=inference, SVC=mistral-7b).
+instanceName: mistral-7b
+
+accel:
+  enabled: true
+  # The hub VPC already has ECR/S3 endpoints with private DNS (old stack).
+  # They move into the RGD at phase 4 only (see plan-bascule-rgd.md).
+  endpoints: []
+
+service:
+  # false until the image and the weights are copied into the InferenceAccel
+  # repository and bucket (otherwise the pods pull from an empty repository).
+  enabled: false
+  zoneSuffix: b                 # GPU zone: where the g6 capacity and the ODCR are
+  # amd64 manifest of the vLLM 0.10.2 image, copied by digest into the
+  # repository created by InferenceAccel.
+  imageDigest: sha256:df2607b26bdda2875de4832f4d08da0055b4b6e3570347f3a849bcc652771dd6
+  # 0 at rest (no GPU node). Set to 1 before a rehearsal or the demo.
+  floorReplicas: 0
+  burstMaxReplicas: 2           # floor 1 + burst 2 = 3 GPU nodes at most
+  burstConsolidateAfter: 10m
+  cooldownPeriod: 900
+  scaleDownStabilization: 900

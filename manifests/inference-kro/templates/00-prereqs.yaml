@@ -1,0 +1,92 @@
+{{- $acct := required "env.accountId (cluster-secret aws_account_id)" .Values.env.accountId -}}
+{{- $cluster := required "env.clusterName (cluster-secret aws_cluster_name)" .Values.env.clusterName -}}
+{{- $prefix := required "env.resourcePrefix (cluster-secret resource_prefix)" .Values.env.resourcePrefix -}}
+{{- $kro := printf "arn:aws:sts::%s:assumed-role/%s-kro-capability-role/KRO" $acct $cluster -}}
+# Prerequisites of the inference RGDs on this hub.
+#  - Namespace of the tenant.
+#  - RBAC for the managed kro capability: the platform ClusterRole
+#    eks-capabilities-kro (Argo-managed, appmod) grants neither karpenter.sh
+#    NodePools, eks.amazonaws.com NodeClasses nor keda.sh. Additive grants,
+#    kept apart from the platform object. Upstream fix: eks-capabilities-rbac.
+#  - IAMRoleSelectors: the managed ACK capability picks its AWS role per
+#    namespace; these reuse the platform cluster-management roles.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kro-inference-capacity
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+rules:
+- apiGroups: ["karpenter.sh"]
+  resources: ["nodepools"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["eks.amazonaws.com"]
+  resources: ["nodeclasses"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kro-inference-capacity
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kro-inference-capacity
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: User
+  name: {{ $kro }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kro-inference-keda
+  namespace: {{ .Values.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+rules:
+- apiGroups: ["keda.sh"]
+  resources: ["scaledobjects", "triggerauthentications"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kro-inference-keda
+  namespace: {{ .Values.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kro-inference-keda
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: User
+  name: {{ $kro }}
+{{- range $svc := list "ec2" "ecr" "eks" "iam" "s3" }}
+---
+apiVersion: services.k8s.aws/v1alpha1
+kind: IAMRoleSelector
+metadata:
+  name: {{ $.Values.namespace }}-{{ $svc }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  arn: arn:aws:iam::{{ $acct }}:role/{{ $prefix }}-cluster-mgmt-{{ $svc }}
+  namespaceSelector:
+    names: [{{ $.Values.namespace }}]
+  resourceTypeSelector:
+  - group: {{ $svc }}.services.k8s.aws
+    kind: ""
+    version: ""
+{{- end }}

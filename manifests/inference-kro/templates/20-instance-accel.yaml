@@ -1,0 +1,26 @@
+{{- if .Values.accel.enabled }}
+apiVersion: kro.run/v1alpha1
+kind: InferenceAccel
+metadata:
+  name: {{ .Values.instanceName }}
+  namespace: {{ .Values.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  aws:
+    accountId: {{ .Values.env.accountId | quote }}
+    region: {{ .Values.env.region }}
+    clusterName: {{ .Values.env.clusterName }}
+    vpcID: {{ .Values.env.vpcId | quote }}
+    subnetIDs: {{ splitList "," .Values.env.privateSubnetIds | toJson }}
+    securityGroupID: {{ .Values.env.clusterSecurityGroupId | quote }}
+  repository:
+    name: vllm
+  weights:
+    prefix: mistral-7b-instruct-v0.3
+  network:
+    endpoints: {{ .Values.accel.endpoints | toJson }}
+  serviceAccount: inference-weights-reader
+  retain: true
+{{- end }}

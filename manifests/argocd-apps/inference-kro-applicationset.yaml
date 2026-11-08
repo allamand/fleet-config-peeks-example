@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ApplicationSet of the kro inference stack — APPLIED BY HAND, like
+# vllm-application.yaml and for the same reason (the addon ApplicationSet of
+# the pinned appmod revision resolves every `path` source against appmod).
+#
+# Why an ApplicationSet and not an Application: its cluster generator reads the
+# cluster-secret annotations and passes them to the chart as values, so no
+# account number, network ID or ARN is ever written in this repository.
+#
+# Selector: the hub (fleet_member=control-plane), and only when KEDA is
+# enabled, because InferenceService creates keda.sh objects.
+#
+# Same conventions as vllm-paris: prune false, selfHeal true, no
+# resources-finalizer (deleting this object must not cascade to the stack).
+#
+# To remove the stack: set accel/service enabled false is NOT enough
+# (prune false). Delete the kro instances explicitly, then this object.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: inference-kro
+  namespace: argocd
+  labels:
+    managed-by: peeks
+    peeks.io/applied-by: hand
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+  - clusters:
+      selector:
+        matchLabels:
+          argocd.argoproj.io/secret-type: cluster
+          fleet_member: control-plane
+        matchExpressions:
+        - key: enable_keda
+          operator: In
+          values: ["true"]
+  template:
+    metadata:
+      name: 'inference-kro-{{ .name }}'
+      labels:
+        managed-by: peeks
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/allamand/fleet-config-peeks-example
+        targetRevision: demo/paris-2026-11-17
+        path: manifests/inference-kro
+        helm:
+          releaseName: inference-kro
+          valuesObject:
+            env:
+              accountId: '{{ index .metadata.annotations "aws_account_id" }}'
+              region: '{{ index .metadata.annotations "aws_region" }}'
+              clusterName: '{{ index .metadata.annotations "aws_cluster_name" }}'
+              resourcePrefix: '{{ index .metadata.annotations "resource_prefix" }}'
+              vpcId: '{{ index .metadata.annotations "aws_vpc_id" }}'
+              privateSubnetIds: '{{ index .metadata.annotations "aws_private_subnet_ids" }}'
+              clusterSecurityGroupId: '{{ index .metadata.annotations "aws_cluster_security_group_id" }}'
+      destination:
+        name: '{{ .name }}'
+        namespace: inference
+      syncPolicy:
+        automated:
+          prune: false
+          selfHeal: true
+        retry:
+          limit: -1
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 5m
