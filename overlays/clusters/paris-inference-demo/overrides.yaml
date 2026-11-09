@@ -2276,6 +2276,22 @@ dcgm-exporter:
       - key: nvidia.com/gpu
         operator: Exists
         effect: NoSchedule
+      # AJOUTÉE le 2026-11-09, APRÈS MESURE. Les NodePools du RGD kro posent un
+      # SECOND taint, propre à l'instance :
+      #   inference.kro.run/instance=mistral-7b:NoSchedule
+      # relevé sur le nœud plancher i-02829196af8481e67, qui porte les deux.
+      # CE QUI CASSAIT : l'affinité `inference-tier Exists` était bien
+      # satisfaite (le nœud porte `inference-tier=floor`), mais une toleration
+      # manquante suffit à écarter le nœud — le DaemonSet restait à
+      # `desired=0`, donc AUCUN DCGM_FI_* dans AMP, sans aucun message
+      # d'erreur. Un `desired=0` ne se lit pas comme une panne.
+      # PAS d'`effect` ici, volontairement : `operator: Exists` sans effet
+      # tolère la clé quel que soit l'effet, donc un NoExecute ajouté plus tard
+      # côté RGD ne reproduirait pas la panne.
+      # Le taint n'est PAS retiré côté RGD : il protège les nœuds GPU réservés
+      # des pods quelconques, c'est sa raison d'être.
+      - key: inference.kro.run/instance
+        operator: Exists
     # ═══════════════════════════════════════════════════════════════════════
     # 🩹 RESTRICTION AUX NŒUDS GPU — AJOUTÉE le 2026-11-05, APRÈS MESURE
     #
