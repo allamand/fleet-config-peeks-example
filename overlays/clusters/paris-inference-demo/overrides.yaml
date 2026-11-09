@@ -871,7 +871,7 @@ grafana-paris:
                     },
                     {
                       "expr": "sum(vllm:num_requests_waiting)",
-                      "refId": "A",
+                      "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "en attente"
                     }
@@ -957,13 +957,13 @@ grafana-paris:
                     },
                     {
                       "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
-                      "refId": "A",
+                      "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "p95"
                     },
                     {
                       "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
-                      "refId": "A",
+                      "refId": "C",
                       "editorMode": "code",
                       "legendFormat": "p99"
                     }
@@ -1010,7 +1010,7 @@ grafana-paris:
                     },
                     {
                       "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket[5m])))",
-                      "refId": "A",
+                      "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "p95"
                     }
@@ -1139,7 +1139,7 @@ grafana-paris:
                     },
                     {
                       "expr": "sum(rate(vllm:generation_tokens_total[5m]))",
-                      "refId": "A",
+                      "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "generation/s"
                     }
