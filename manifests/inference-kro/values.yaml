@@ -26,7 +26,7 @@ accel:
   # interface endpoints with private DNS in one VPC conflict. Turn on only
   # after the old ones are removed. Needs env.privateRouteTableIds.
   vpcEndpoints:
-    enabled: false
+    enabled: true
   retain: true
   weights:
     prefix: mistral-7b-instruct-v0.3
