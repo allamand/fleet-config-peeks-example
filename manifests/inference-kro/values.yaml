@@ -9,6 +9,7 @@ env:
   resourcePrefix: ""
   vpcId: ""
   privateSubnetIds: ""        # comma-separated, as in the annotation
+  privateRouteTableIds: ""    # comma-separated; annotation aws_private_route_table_ids (not set upstream yet)
   clusterSecurityGroupId: ""
 
 namespace: inference
@@ -20,9 +21,12 @@ instanceName: mistral-7b
 
 accel:
   enabled: true
-  # The hub VPC already has ECR/S3 endpoints with private DNS (old stack).
-  # They move into the RGD at phase 4 only (see plan-bascule-rgd.md).
-  endpoints: []
+  # VPC endpoints owned by the RGD: ecr.api + ecr.dkr (interface, private DNS)
+  # and the S3 gateway. false while the old endpoints exist in the VPC: two ECR
+  # interface endpoints with private DNS in one VPC conflict. Turn on only
+  # after the old ones are removed. Needs env.privateRouteTableIds.
+  vpcEndpoints:
+    enabled: false
   retain: true
   weights:
     prefix: mistral-7b-instruct-v0.3

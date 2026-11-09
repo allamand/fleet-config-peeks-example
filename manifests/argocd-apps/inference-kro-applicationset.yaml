@@ -58,6 +58,8 @@ spec:
               resourcePrefix: '{{ index .metadata.annotations "resource_prefix" }}'
               vpcId: '{{ index .metadata.annotations "aws_vpc_id" }}'
               privateSubnetIds: '{{ index .metadata.annotations "aws_private_subnet_ids" }}'
+              # absent today: index on a missing map key yields "" (no error)
+              privateRouteTableIds: '{{ index .metadata.annotations "aws_private_route_table_ids" }}'
               clusterSecurityGroupId: '{{ index .metadata.annotations "aws_cluster_security_group_id" }}'
       destination:
         name: '{{ .name }}'

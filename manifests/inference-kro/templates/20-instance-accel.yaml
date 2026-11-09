@@ -15,13 +15,24 @@ spec:
     vpcID: {{ .Values.env.vpcId | quote }}
     subnetIDs: {{ splitList "," .Values.env.privateSubnetIds | toJson }}
     securityGroupID: {{ .Values.env.clusterSecurityGroupId | quote }}
+{{- if .Values.accel.vpcEndpoints.enabled }}
+    # The S3 gateway needs the private route tables. No upstream annotation
+    # exists yet: they come from the cluster-secret annotation
+    # aws_private_route_table_ids (rendered by ESO from Secrets Manager).
+    routeTableIDs: {{ splitList "," (required "accel.vpcEndpoints.enabled needs env.privateRouteTableIds (cluster-secret aws_private_route_table_ids)" .Values.env.privateRouteTableIds) | toJson }}
+{{- end }}
   weights:
     prefix: {{ .Values.accel.weights.prefix }}
     huggingFace: {{ .Values.accel.weights.huggingFace | toJson }}
   image:
     tag: {{ .Values.accel.image.tag }}
   network:
-    endpoints: {{ .Values.accel.endpoints | toJson }}
+{{- if .Values.accel.vpcEndpoints.enabled }}
+    endpoints: ["ecr.api", "ecr.dkr", "s3"]
+    privateDNS: true
+{{- else }}
+    endpoints: []
+{{- end }}
   serviceAccount: inference-weights-reader
   retain: {{ .Values.accel.retain }}
 {{- end }}
