@@ -1499,7 +1499,7 @@ grafana-paris:
                     },
                     {
                       "expr": "DCGM_FI_PROF_GR_ENGINE_ACTIVE",
-                      "refId": "A",
+                      "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "moteur graphique"
                     }
@@ -1546,7 +1546,7 @@ grafana-paris:
                     },
                     {
                       "expr": "DCGM_FI_DEV_FB_FREE",
-                      "refId": "A",
+                      "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "libre"
                     }
@@ -1593,13 +1593,13 @@ grafana-paris:
                     },
                     {
                       "expr": "DCGM_FI_DEV_MEMORY_TEMP",
-                      "refId": "A",
+                      "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "temperature memoire (C)"
                     },
                     {
                       "expr": "DCGM_FI_DEV_POWER_USAGE",
-                      "refId": "A",
+                      "refId": "C",
                       "editorMode": "code",
                       "legendFormat": "puissance (W)"
                     }
@@ -1645,7 +1645,7 @@ grafana-paris:
                     },
                     {
                       "expr": "rate(DCGM_FI_PROF_PCIE_TX_BYTES[5m])",
-                      "refId": "A",
+                      "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "TX"
                     }
@@ -1692,7 +1692,7 @@ grafana-paris:
                     },
                     {
                       "expr": "DCGM_FI_DEV_MEM_CLOCK",
-                      "refId": "A",
+                      "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "memoire"
                     }
