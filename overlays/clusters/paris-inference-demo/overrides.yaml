@@ -1220,7 +1220,7 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "count(DCGM_FI_DEV_GPU_UTIL > 0)",
+                      "expr": "count(DCGM_FI_DEV_GPU_UTIL{pod!=\"\"} > 0)",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "actifs",
@@ -1257,7 +1257,7 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "max(DCGM_FI_DEV_GPU_UTIL)",
+                      "expr": "max(DCGM_FI_DEV_GPU_UTIL{pod!=\"\"})",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "util",
@@ -1297,7 +1297,7 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "max(DCGM_FI_DEV_GPU_TEMP)",
+                      "expr": "max(DCGM_FI_DEV_GPU_TEMP{pod!=\"\"})",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "temp",
@@ -1336,7 +1336,7 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "sum(DCGM_FI_DEV_POWER_USAGE)",
+                      "expr": "sum(DCGM_FI_DEV_POWER_USAGE{pod!=\"\"})",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "watts",
@@ -1375,7 +1375,7 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "sum(DCGM_FI_DEV_FB_USED) / clamp_min(sum(DCGM_FI_DEV_FB_USED) + sum(DCGM_FI_DEV_FB_FREE), 1)",
+                      "expr": "sum(DCGM_FI_DEV_FB_USED{pod!=\"\"}) / clamp_min(sum(DCGM_FI_DEV_FB_USED{pod!=\"\"}) + sum(DCGM_FI_DEV_FB_FREE{pod!=\"\"}), 1)",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "FB",
@@ -1415,7 +1415,7 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "sum(DCGM_FI_DEV_XID_ERRORS)",
+                      "expr": "sum(DCGM_FI_DEV_XID_ERRORS{pod!=\"\"})",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "XID",
@@ -1452,7 +1452,7 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "DCGM_FI_DEV_GPU_UTIL",
+                      "expr": "DCGM_FI_DEV_GPU_UTIL{pod!=\"\"}",
                       "refId": "A",
                       "editorMode": "code"
                     }
@@ -1492,13 +1492,13 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE",
+                      "expr": "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE{pod!=\"\"}",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "tensor"
                     },
                     {
-                      "expr": "DCGM_FI_PROF_GR_ENGINE_ACTIVE",
+                      "expr": "DCGM_FI_PROF_GR_ENGINE_ACTIVE{pod!=\"\"}",
                       "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "moteur graphique"
@@ -1539,13 +1539,13 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "DCGM_FI_DEV_FB_USED",
+                      "expr": "DCGM_FI_DEV_FB_USED{pod!=\"\"}",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "utilise"
                     },
                     {
-                      "expr": "DCGM_FI_DEV_FB_FREE",
+                      "expr": "DCGM_FI_DEV_FB_FREE{pod!=\"\"}",
                       "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "libre"
@@ -1586,19 +1586,19 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "DCGM_FI_DEV_GPU_TEMP",
+                      "expr": "DCGM_FI_DEV_GPU_TEMP{pod!=\"\"}",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "temperature GPU (C)"
                     },
                     {
-                      "expr": "DCGM_FI_DEV_MEMORY_TEMP",
+                      "expr": "DCGM_FI_DEV_MEMORY_TEMP{pod!=\"\"}",
                       "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "temperature memoire (C)"
                     },
                     {
-                      "expr": "DCGM_FI_DEV_POWER_USAGE",
+                      "expr": "DCGM_FI_DEV_POWER_USAGE{pod!=\"\"}",
                       "refId": "C",
                       "editorMode": "code",
                       "legendFormat": "puissance (W)"
@@ -1638,13 +1638,13 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "rate(DCGM_FI_PROF_PCIE_RX_BYTES[5m])",
+                      "expr": "rate(DCGM_FI_PROF_PCIE_RX_BYTES{pod!=\"\"}[5m])",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "RX"
                     },
                     {
-                      "expr": "rate(DCGM_FI_PROF_PCIE_TX_BYTES[5m])",
+                      "expr": "rate(DCGM_FI_PROF_PCIE_TX_BYTES{pod!=\"\"}[5m])",
                       "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "TX"
@@ -1685,13 +1685,13 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "DCGM_FI_DEV_SM_CLOCK",
+                      "expr": "DCGM_FI_DEV_SM_CLOCK{pod!=\"\"}",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "SM"
                     },
                     {
-                      "expr": "DCGM_FI_DEV_MEM_CLOCK",
+                      "expr": "DCGM_FI_DEV_MEM_CLOCK{pod!=\"\"}",
                       "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "memoire"
@@ -1732,7 +1732,7 @@ grafana-paris:
                   },
                   "targets": [
                     {
-                      "expr": "sum(rate(DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION[5m]))",
+                      "expr": "sum(rate(DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION{pod!=\"\"}[5m]))",
                       "refId": "A",
                       "editorMode": "code",
                       "legendFormat": "mJ/s"
