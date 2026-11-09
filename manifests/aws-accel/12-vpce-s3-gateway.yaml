@@ -44,7 +44,10 @@ metadata:
   annotations:
     services.k8s.aws/region: eu-west-3
     services.k8s.aws/adoption-policy: adopt-or-create
-    services.k8s.aws/deletion-policy: retain
+    # Passe de `retain` a `delete` le 2026-11-09 : voir 10-vpce-ecr-api.yaml.
+    # Pour cet endpoint gateway, la suppression retire aussi ses entrees des
+    # tables de routage rtb-0bd9072380f3cb709 et rtb-0412a2b61cebc128b.
+    services.k8s.aws/deletion-policy: delete
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
     argocd.argoproj.io/sync-wave: "-2"
 spec:

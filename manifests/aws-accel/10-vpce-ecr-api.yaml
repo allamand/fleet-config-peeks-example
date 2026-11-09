@@ -39,7 +39,11 @@ metadata:
   annotations:
     services.k8s.aws/region: eu-west-3
     services.k8s.aws/adoption-policy: adopt-or-create
-    services.k8s.aws/deletion-policy: retain
+    # Passe de `retain` a `delete` le 2026-11-09 : la pile kro sert depuis
+    # 21:37 UTC la veille et ses propres endpoints prennent le relais. En
+    # `retain`, retirer ce manifeste n'aurait supprime QUE l'objet Kubernetes
+    # et laisse l'endpoint vivant dans AWS, facture a l'heure et par zone.
+    services.k8s.aws/deletion-policy: delete
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
     argocd.argoproj.io/sync-wave: "-2"
 spec:
