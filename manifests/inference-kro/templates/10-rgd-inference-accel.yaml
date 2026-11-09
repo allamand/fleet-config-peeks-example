@@ -72,6 +72,10 @@ spec:
       podIdentityReady: ${pia.?status.?conditions.orValue([]).exists(c, c.type == "Ready" && c.status == "True")}
       weightsReady: ${weightsSeed.?status.?succeeded.orValue(0) >= 1}
       imageReady: ${imageSeed.?status.?succeeded.orValue(0) >= 1}
+      # empty when the matching endpoint is not created (network.endpoints)
+      ecrApiEndpointId: ${vpceEcrApi.?status.?vpcEndpointID.orValue("")}
+      ecrDkrEndpointId: ${vpceEcrDkr.?status.?vpcEndpointID.orValue("")}
+      s3EndpointId: ${vpceS3.?status.?vpcEndpointID.orValue("")}
   resources:
   - id: ptcRule
     includeWhen:
