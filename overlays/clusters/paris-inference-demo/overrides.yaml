@@ -2130,13 +2130,13 @@ grafana-paris:
                     },
                     {
                       "expr": "sum(rate(keda_scaled_job_errors_total[5m]))",
-                      "refId": "A",
+                      "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "ScaledJob"
                     },
                     {
                       "expr": "sum(rate(keda_scaler_detail_errors_total[5m]))",
-                      "refId": "A",
+                      "refId": "C",
                       "editorMode": "code",
                       "legendFormat": "scaler"
                     }
@@ -2182,7 +2182,7 @@ grafana-paris:
                     },
                     {
                       "expr": "sum(keda_trigger_registered_total)",
-                      "refId": "A",
+                      "refId": "B",
                       "editorMode": "code",
                       "legendFormat": "triggers"
                     }
