@@ -609,7 +609,7 @@ grafana-paris:
                 {
                   "id": 1,
                   "type": "text",
-                  "title": "Provenance et limites",
+                  "title": "Provenance and limitations",
                   "gridPos": {
                     "x": 0,
                     "y": 0,
@@ -624,7 +624,7 @@ grafana-paris:
                 {
                   "id": 2,
                   "type": "stat",
-                  "title": "Requetes en cours",
+                  "title": "Running requests",
                   "description": "loggers.py:189 — gauge num_requests_running",
                   "gridPos": {
                     "x": 0,
@@ -661,7 +661,7 @@ grafana-paris:
                 {
                   "id": 3,
                   "type": "stat",
-                  "title": "Requetes en attente",
+                  "title": "Waiting requests",
                   "description": "loggers.py:198 — c est CE signal que KEDA doit suivre",
                   "gridPos": {
                     "x": 4,
@@ -698,7 +698,7 @@ grafana-paris:
                 {
                   "id": 4,
                   "type": "stat",
-                  "title": "KV cache utilise",
+                  "title": "KV cache usage",
                   "description": "loggers.py:245 — nom COURANT en 0.10.2. gpu_cache_usage_perc est l ancien nom, deprecie.",
                   "gridPos": {
                     "x": 8,
@@ -738,7 +738,7 @@ grafana-paris:
                 {
                   "id": 5,
                   "type": "stat",
-                  "title": "Debit de generation",
+                  "title": "Generation throughput",
                   "description": "loggers.py:286 — compteur generation_tokens",
                   "gridPos": {
                     "x": 12,
@@ -777,7 +777,7 @@ grafana-paris:
                 {
                   "id": 6,
                   "type": "stat",
-                  "title": "Prefix cache, taux de reutilisation",
+                  "title": "Prefix cache hit rate",
                   "description": "loggers.py:260 et 252 — noms COURANTS",
                   "gridPos": {
                     "x": 16,
@@ -854,7 +854,7 @@ grafana-paris:
                 {
                   "id": 8,
                   "type": "timeseries",
-                  "title": "Requetes : en cours et en attente",
+                  "title": "Requests: running and waiting",
                   "description": "Le creux de 'en attente' est ce que la montee en charge doit produire.",
                   "gridPos": {
                     "x": 0,
@@ -900,7 +900,7 @@ grafana-paris:
                 {
                   "id": 9,
                   "type": "timeseries",
-                  "title": "Occupation du KV cache",
+                  "title": "KV cache usage over time",
                   "description": "loggers.py:245 — une seule requete, sans legende : Grafana rend le nom de serie complet, donc model_name et engine apparaissent d eux-memes.",
                   "gridPos": {
                     "x": 12,
@@ -993,7 +993,7 @@ grafana-paris:
                 {
                   "id": 11,
                   "type": "timeseries",
-                  "title": "Latence inter-token (p50 / p95)",
+                  "title": "Inter-token latency (p50 / p95)",
                   "description": "loggers.py:396 — nom COURANT. time_per_output_token_seconds est deprecie (0.11).",
                   "gridPos": {
                     "x": 12,
@@ -1040,7 +1040,7 @@ grafana-paris:
                 {
                   "id": 12,
                   "type": "timeseries",
-                  "title": "Latence de bout en bout (p95)",
+                  "title": "End-to-end latency (p95)",
                   "description": "loggers.py:411",
                   "gridPos": {
                     "x": 0,
@@ -1081,7 +1081,7 @@ grafana-paris:
                 {
                   "id": 13,
                   "type": "timeseries",
-                  "title": "Attente en file (p95)",
+                  "title": "Queue time (p95)",
                   "description": "loggers.py:419",
                   "gridPos": {
                     "x": 8,
@@ -1122,7 +1122,7 @@ grafana-paris:
                 {
                   "id": 14,
                   "type": "timeseries",
-                  "title": "Jetons : prompt et generation",
+                  "title": "Prompt and generation tokens",
                   "description": "loggers.py:278 et 286",
                   "gridPos": {
                     "x": 16,
@@ -1195,7 +1195,7 @@ grafana-paris:
                 {
                   "id": 1,
                   "type": "text",
-                  "title": "Provenance et limites",
+                  "title": "Provenance and limitations",
                   "gridPos": {
                     "x": 0,
                     "y": 0,
@@ -1210,7 +1210,7 @@ grafana-paris:
                 {
                   "id": 2,
                   "type": "stat",
-                  "title": "GPU occupes",
+                  "title": "Busy GPUs",
                   "description": "config-map:23",
                   "gridPos": {
                     "x": 0,
@@ -1247,7 +1247,7 @@ grafana-paris:
                 {
                   "id": 3,
                   "type": "stat",
-                  "title": "Occupation GPU (max)",
+                  "title": "GPU utilization (max)",
                   "description": "config-map:23 — en pourcent, 0-100",
                   "gridPos": {
                     "x": 4,
@@ -1287,7 +1287,7 @@ grafana-paris:
                 {
                   "id": 4,
                   "type": "stat",
-                  "title": "Temperature max",
+                  "title": "Max temperature",
                   "description": "config-map:11",
                   "gridPos": {
                     "x": 8,
@@ -1326,7 +1326,7 @@ grafana-paris:
                 {
                   "id": 5,
                   "type": "stat",
-                  "title": "Puissance totale",
+                  "title": "Total power",
                   "description": "config-map:14",
                   "gridPos": {
                     "x": 12,
@@ -1365,7 +1365,7 @@ grafana-paris:
                 {
                   "id": 6,
                   "type": "stat",
-                  "title": "Memoire GPU utilisee",
+                  "title": "GPU memory used",
                   "description": "config-map:39 et 38 — en MiB, d ou le ratio",
                   "gridPos": {
                     "x": 16,
@@ -1405,7 +1405,7 @@ grafana-paris:
                 {
                   "id": 7,
                   "type": "stat",
-                  "title": "Erreurs XID",
+                  "title": "XID errors",
                   "description": "config-map:29 — tout non-zero est un incident materiel",
                   "gridPos": {
                     "x": 20,
@@ -1442,7 +1442,7 @@ grafana-paris:
                 {
                   "id": 8,
                   "type": "timeseries",
-                  "title": "Occupation GPU, par GPU",
+                  "title": "GPU utilization, per GPU",
                   "description": "config-map:23 — sans legende, donc Hostname et gpu apparaissent dans le nom de serie.",
                   "gridPos": {
                     "x": 0,
@@ -1482,7 +1482,7 @@ grafana-paris:
                 {
                   "id": 9,
                   "type": "timeseries",
-                  "title": "Activite des Tensor Cores et du moteur graphique",
+                  "title": "Tensor Core and graphics engine activity",
                   "description": "config-map:76 et 73 — ratios 0-1, pas des pourcents. Tensor bas avec GPU_UTIL haut = le modele ne tire pas parti des Tensor Cores.",
                   "gridPos": {
                     "x": 12,
@@ -1529,7 +1529,7 @@ grafana-paris:
                 {
                   "id": 10,
                   "type": "timeseries",
-                  "title": "Memoire GPU (framebuffer)",
+                  "title": "GPU memory (framebuffer)",
                   "description": "config-map:39 et 38 — en MiB",
                   "gridPos": {
                     "x": 0,
@@ -1576,7 +1576,7 @@ grafana-paris:
                 {
                   "id": 11,
                   "type": "timeseries",
-                  "title": "Temperature et puissance",
+                  "title": "Temperature and power",
                   "description": "config-map:11, 10 et 14 — trois unites melangees, d ou les legendes explicites et l absence d unite d axe.",
                   "gridPos": {
                     "x": 12,
@@ -1628,7 +1628,7 @@ grafana-paris:
                 {
                   "id": 12,
                   "type": "timeseries",
-                  "title": "Bande passante PCIe",
+                  "title": "PCIe bandwidth",
                   "description": "config-map:82 et 81 — definis en gauge aux lignes 81-82 ; les lignes 31-32, en counter, sont commentees. Legendes statiques : rate() efface __name__, donc sans elles les deux series seraient indiscernables.",
                   "gridPos": {
                     "x": 0,
@@ -1675,7 +1675,7 @@ grafana-paris:
                 {
                   "id": 13,
                   "type": "timeseries",
-                  "title": "Horloges",
+                  "title": "Clocks",
                   "description": "config-map:6 et 7 — en MHz",
                   "gridPos": {
                     "x": 8,
@@ -1722,7 +1722,7 @@ grafana-paris:
                 {
                   "id": 14,
                   "type": "timeseries",
-                  "title": "Energie consommee (cumul)",
+                  "title": "Energy consumed (cumulative)",
                   "description": "config-map:15 — compteur, en millijoules",
                   "gridPos": {
                     "x": 16,
@@ -1789,7 +1789,7 @@ grafana-paris:
                 {
                   "id": 1,
                   "type": "text",
-                  "title": "Provenance et limites",
+                  "title": "Provenance and limitations",
                   "gridPos": {
                     "x": 0,
                     "y": 0,
@@ -1804,7 +1804,7 @@ grafana-paris:
                 {
                   "id": 2,
                   "type": "table",
-                  "title": "KEDA — version en service",
+                  "title": "KEDA — running version",
                   "description": "prommetrics.go:37 — LE SEUL nom deja confirme vivant, sur l endpoint 8080 et dans AMP. Metrique d info : sa valeur vaut toujours 1, l information est dans ses labels, rendus ici en colonnes.",
                   "gridPos": {
                     "x": 0,
@@ -1844,7 +1844,7 @@ grafana-paris:
                 {
                   "id": 3,
                   "type": "stat",
-                  "title": "Scalers actifs",
+                  "title": "Active scalers",
                   "description": "prommetrics.go:63 — a confirmer le 10/11",
                   "gridPos": {
                     "x": 6,
@@ -1881,7 +1881,7 @@ grafana-paris:
                 {
                   "id": 4,
                   "type": "stat",
-                  "title": "Objets enregistres",
+                  "title": "Registered objects",
                   "description": "prommetrics.go:117 — a confirmer le 10/11",
                   "gridPos": {
                     "x": 12,
@@ -1918,7 +1918,7 @@ grafana-paris:
                 {
                   "id": 5,
                   "type": "stat",
-                  "title": "Erreurs de scaler (15 min)",
+                  "title": "Scaler errors (15 min)",
                   "description": "prommetrics.go:81 — a confirmer le 10/11",
                   "gridPos": {
                     "x": 18,
@@ -1955,7 +1955,7 @@ grafana-paris:
                 {
                   "id": 6,
                   "type": "timeseries",
-                  "title": "Valeur lue par chaque scaler",
+                  "title": "Value read by each scaler",
                   "description": "prommetrics.go:45 — c est la valeur que la HPA compare a sa cible. Pour la demo, elle doit suivre vllm:num_requests_waiting. Sans legende, le nom de serie porte scaledObject, scaler et metric. A confirmer le 10/11.",
                   "gridPos": {
                     "x": 0,
@@ -1994,7 +1994,7 @@ grafana-paris:
                 {
                   "id": 7,
                   "type": "timeseries",
-                  "title": "Scaler actif (1) ou non (0)",
+                  "title": "Scaler active (1) or not (0)",
                   "description": "prommetrics.go:63 — a confirmer le 10/11",
                   "gridPos": {
                     "x": 12,
@@ -2033,7 +2033,7 @@ grafana-paris:
                 {
                   "id": 8,
                   "type": "timeseries",
-                  "title": "Latence de lecture des scalers",
+                  "title": "Scaler read latency",
                   "description": "prommetrics.go:54 — en SECONDES. A confirmer le 10/11.",
                   "gridPos": {
                     "x": 0,
@@ -2073,7 +2073,7 @@ grafana-paris:
                 {
                   "id": 9,
                   "type": "timeseries",
-                  "title": "Latence de la boucle de scaling",
+                  "title": "Scaling loop latency",
                   "description": "prommetrics.go:126 — a confirmer le 10/11",
                   "gridPos": {
                     "x": 12,
@@ -2113,7 +2113,7 @@ grafana-paris:
                 {
                   "id": 10,
                   "type": "timeseries",
-                  "title": "Erreurs, par origine",
+                  "title": "Errors, by source",
                   "description": "prommetrics.go:90, 99 et 81 — a confirmer le 10/11",
                   "gridPos": {
                     "x": 0,
@@ -2165,7 +2165,7 @@ grafana-paris:
                 {
                   "id": 11,
                   "type": "timeseries",
-                  "title": "ScaledObjects en pause / triggers enregistres",
+                  "title": "Paused ScaledObjects / registered triggers",
                   "description": "prommetrics.go:72 et 108 — un ScaledObject en pause pendant la demo expliquerait une absence de montee en charge. A confirmer le 10/11.",
                   "gridPos": {
                     "x": 12,
