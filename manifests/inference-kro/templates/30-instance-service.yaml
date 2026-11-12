@@ -38,7 +38,15 @@ spec:
     enabled: true
     minReplicas: 0
     maxReplicas: {{ .Values.service.burstMaxReplicas }}
-    capacityTypes: ["spot", "on-demand"]
+    # `spot` RETIRÉ le 2026-11-12, sur mesure du quota. Le compte dispose de
+    # 768 vCPU en on-demand G mais de seulement **64 vCPU en spot G** :
+    #   aws service-quotas get-service-quota --service-code ec2 --quota-code L-3819A6DF
+    # Trois g6.16xlarge en spot demanderaient 192 vCPU, soit trois fois le
+    # quota. Karpenter aurait donc basculé sur on-demand ou sur des tailles
+    # plus petites, SANS message : le coût et le chrono de la démonstration
+    # auraient dépendu d'un arbitrage invisible en scène.
+    # À remettre dès que le quota spot est relevé au-delà de 192 vCPU.
+    capacityTypes: ["on-demand"]
     instanceTypes: ["g6.4xlarge", "g6.8xlarge", "g6.16xlarge"]
     maxNodes: {{ .Values.service.burstMaxReplicas }}
     consolidateAfter: {{ .Values.service.burstConsolidateAfter }}
