@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  GÉNÉRATEUR DE CHARGE — déclenche la montée 0→3 du débordement.
+#
+#  CE FICHIER N'EST DÉPLOYÉ PAR RIEN. Aucune Application Argo ne surveille
+#  `tools/`, et l'ApplicationSet `inference-kro` utilise un générateur de
+#  CLUSTERS, pas de répertoires. Il se lance à la main :
+#
+#      kubectl apply -f tools/load-generator.yaml
+#      kubectl -n inference delete pod charge-vllm --now      # arrêt immédiat
+#
+#  Il vivait auparavant dans un /tmp de session, dont le chemin change d'une
+#  session à l'autre : il a donc été versionné ici pour ne pas disparaître la
+#  veille d'une démonstration.
+#
+#  ─── CIBLE ─────────────────────────────────────────────────────────────────
+#  Mise à jour le 2026-11-12 : il visait `vllm-mistral.vllm.svc`, service et
+#  namespace tous deux SUPPRIMÉS le 09/11 avec l'ancienne pile. Il visait donc
+#  le vide et n'aurait rien déclenché. Cible relevée sur le cluster :
+#      mistral-7b.inference.svc.cluster.local:8000
+#
+#  ─── DIMENSIONNEMENT, et pourquoi ces chiffres ─────────────────────────────
+#  Chaque réplique vLLM ne sert que 4 requêtes simultanément
+#  (`--max-num-seqs 4`) ; au-delà elle met en file, et c'est
+#  `vllm:num_requests_waiting` qui monte — le signal du ScaledObject.
+#  KEDA vise `ceil(file / threshold)` avec `threshold: "2"` et
+#  `maxReplicaCount: 3`, donc il faut au moins **6 requêtes en attente** pour
+#  demander les 3 répliques.
+#
+#  48 flux concurrents laissent une quarantaine de requêtes en attente dès la
+#  première réplique, soit très au-delà des 6 nécessaires — la marge est
+#  volontaire, pour que le déclenchement ne dépende pas du tirage de scrape.
+#  `max_tokens: 200` fait durer chaque requête plusieurs secondes, pour que les
+#  flux restent réellement occupés au lieu de boucler à vide.
+#
+#  ─── POURQUOI UN POD NU ────────────────────────────────────────────────────
+#  Sans contrôleur, donc rien ne le recrée : un `delete` l'arrête pour de bon.
+#  C'est ce qu'on veut d'un générateur de charge qu'on coupe en scène.
+#
+#  Il tourne sur un nœud CPU : AUCUNE toleration des taints `nvidia.com/gpu`
+#  ni `inference.kro.run/instance`, donc il ne peut pas se placer sur un GPU
+#  qui doit servir le modèle.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Pod
+metadata:
+  name: charge-vllm
+  namespace: inference
+  labels:
+    role: generateur-de-charge
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 2
+  containers:
+    - name: charge
+      image: curlimages/curl:8.11.1
+      resources:
+        requests: { cpu: "500m", memory: 256Mi }
+        limits:   { cpu: "2",    memory: 512Mi }
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          URL=http://mistral-7b.inference.svc.cluster.local:8000/v1/chat/completions
+          echo "demarrage de la charge a $(date -u +%H:%M:%SZ)"
+          i=0
+          while [ $i -lt 48 ]; do
+            (
+              while true; do
+                curl -s -o /dev/null --max-time 120 \
+                  -H 'Content-Type: application/json' \
+                  -d '{"model":"mistral-7b","messages":[{"role":"user","content":"Explique en detail le fonctionnement d un GPU pour l inference de modeles de langage, en plusieurs paragraphes."}],"max_tokens":200,"temperature":0.7}' \
+                  "$URL" || true
+              done
+            ) &
+            i=$((i+1))
+          done
+          echo "48 flux lances"
+          wait
