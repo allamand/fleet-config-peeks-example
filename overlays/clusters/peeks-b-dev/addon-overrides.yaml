@@ -1,0 +1,29 @@
+# peeks-b-dev ONLY: fleet-secret enabledAddons overrides (agentic spoke).
+#
+# Read as the LAST valueFile of fleet-secret-peeks-b-dev
+# ($overlay/overlays/clusters/<cluster>/addon-overrides.yaml, overlay_repo_basepath=""),
+# per gitops/bootstrap/fleet-secrets.yaml — so nothing here reaches peeks-a-dev or
+# any hub. Helm deep-merges enabledAddons over the environment file
+# (gitops/overlays/environments/dev/enabled-addons.yaml, which is CORE / agent-free
+# by design and is left unchanged); each true key becomes the spoke cluster-secret
+# label enable_<key>: 'true'.
+#
+# Same mechanism as overlays/clusters/peeks-a-hub/addon-overrides.yaml (commit
+# 999d2053), applied to a SPOKE. This is the agentic delta of OAP v0.1.0's own dev
+# overlay (gitops/overlays/environments/dev/enabled-addons.yaml) over the fork's
+# agent-free dev overlay, so peeks-b-dev's effective addon set matches OAP's agentic
+# dev spoke. agent_evaluation / agent_sandbox / kata stay OFF, exactly as OAP dev.
+enabledAddons:
+  # Enablers the agentic addons depend on (absent from the fork's agent-free dev overlay)
+  cert_manager: true        # webhook certs for the agentic controllers
+  crossplane_aws: true      # Crossplane AWS provider (backs abstractions)
+  abstractions: true        # Crossplane XRDs incl. PodIdentity — lets the aws-service-identity OAM trait resolve here
+  karpenter: true           # self-managed Karpenter controller (as OAP dev ships it; Kata nodepool stays off)
+  # Agentic platform (matches OAP v0.1.0 dev overlay)
+  agent_platform: true
+  bifrost: true
+  otel_collector: true
+  monitoring: true
+  agent_core: true
+  agent_gateway: true
+  oam_components: true
