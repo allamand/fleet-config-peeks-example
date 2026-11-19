@@ -462,3 +462,45 @@ enable_<addon> labels on the spoke cluster-secret (fleet-secret chart, ESO)
   appmod-blueprints `tenants/workshop/`. Without it, `aws-load-balancer-controller`,
   `kubevela` and `ingress-class-alb` stay OutOfSync on the spokes.
 - Hubs are unaffected: they read only `control-plane`.
+
+### Make a spoke agentic (per-cluster overlay)
+
+The per-environment files above are **CORE / agent-free** on purpose, so by default a spoke runs
+no agentic addons. Two per-cluster override slots exist, at **different paths**, and they are not
+interchangeable:
+
+| Layer | Slot | Path in this repo | Use it to |
+|-------|------|-------------------|-----------|
+| CORE | `$values` (basepath `gitops/`) | `gitops/overlays/clusters/<cluster>/addon-overrides.yaml` | toggle a **core** addon for one spoke |
+| AGENT / OAP | `$overlay` (basepath `""`, repo root) | `overlays/clusters/<cluster>/addon-overrides.yaml` | **turn the agentic capabilities on** for one spoke |
+
+The AGENT slot is read as the spoke's **last** value file (`fleet-secrets.yaml`), so it
+deep-merges over the environment file and stamps `enable_<key>` on that spoke's cluster-secret
+only — nothing reaches the other spokes or the hubs.
+
+This repo ships a worked example: `overlays/clusters/peeks-b-dev/addon-overrides.yaml` makes the
+`peeks-b-dev` spoke agentic. To make your own spoke agentic, add the same file for it:
+
+```yaml
+# overlays/clusters/<spoke>/addon-overrides.yaml   (repo ROOT, not gitops/)
+enabledAddons:
+  # enablers the agentic addons depend on (absent from the agent-free dev overlay)
+  cert_manager: true
+  crossplane_aws: true
+  abstractions: true        # Crossplane XRDs incl. PodIdentity (aws-service-identity OAM trait)
+  karpenter: true
+  # agentic platform
+  agent_platform: true
+  bifrost: true
+  otel_collector: true
+  monitoring: true
+  agent_core: true
+  agent_gateway: true
+  oam_components: true
+```
+
+`git commit && git push` to your copy; ArgoCD reconciles and the agentic addon Applications are
+created for that spoke. This is the agentic delta over
+`gitops/overlays/environments/dev/enabled-addons.yaml`; `agent_evaluation`, `agent_sandbox` and the
+kata keys stay off. The same file under a hub cluster (as `overlays/clusters/<hub>/addon-overrides.yaml`)
+turns the hub agentic the same way.
