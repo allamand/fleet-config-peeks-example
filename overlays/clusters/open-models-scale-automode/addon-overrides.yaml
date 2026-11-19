@@ -1,6 +1,6 @@
 # Hub open-models-scale-automode (cloud-native-ai demo ai-infra/open-models-scale,
 # retest of MR !8/!9). Read only by that hub, through this branch
-# (fleetRepo.revision = retest/open-models-scale-demo3): the hubs that read main
+# (fleetRepo.revision = retest/open-models-scale): the hubs that read main
 # are not affected. Same switches as the hub of the Paris demo, which ran on them.
 #
 # `true` adds the label enable_<addon> to the hub's cluster secret; `false` or a
