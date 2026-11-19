@@ -1,0 +1,18 @@
+# Source-IP allowlist for the shared "platform" ALB of hub peeks-hub (peeks-a).
+# Sev2 V2465322851 remediation (2026-11-19): the ALB was open to 0.0.0.0/0 on 443.
+#
+# ISOLATED OVERLAY for peeks-a: this file lives under the dedicated basepath
+# "peeks-a-overlay/" (set as overlay_repo_basepath on peeks-hub/config). That path
+# deliberately contains ONLY this ingress-class-alb values file -- NO enabled-addons.yaml
+# and NO overrides.yaml -- so repointing peeks-a's $overlay here changes ONLY the ALB
+# allowlist and leaves peeks-a's enabled addons (sourced from OAP $values) and its fleet
+# (fleetRepoURL stays OAP) untouched. Do NOT add enabled-addons.yaml here.
+#
+# IPv4 /32 only: the hub's own NAT egress (REQUIRED: in-cluster SSO calls Keycloak
+# through this public ALB) and the OAP spoke NAT that calls the hub.
+inboundCidrs:
+  - "44.228.251.53/32"     # peeks-hub VPC NAT egress (vpc-0c7302f09ad532e78) -- REQUIRED for in-cluster SSO
+  - "44.252.233.105/32"    # oap-dev spoke NAT egress (vpc-0e3cac58fb84c099f) -- OAP addons calling the hub
+# Browser access: Seb's workstation egress /32 is unknown tonight and not needed.
+# To grant it later, uncomment and set, then commit + sync:
+# extraInboundCidrs: "X.X.X.X/32"
