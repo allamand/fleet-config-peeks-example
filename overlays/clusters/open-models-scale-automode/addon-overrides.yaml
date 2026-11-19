@@ -1,0 +1,44 @@
+# Hub open-models-scale-automode (cloud-native-ai demo ai-infra/open-models-scale,
+# retest of MR !8/!9). Read only by that hub, through this branch
+# (fleetRepo.revision = retest/open-models-scale-demo3): the hubs that read main
+# are not affected. Same switches as the hub of the Paris demo, which ran on them.
+#
+# `true` adds the label enable_<addon> to the hub's cluster secret; `false` or a
+# missing key leaves the add-on off. This layer wins over the environment ones.
+enabledAddons:
+  # what the demo needs
+  keda: true
+  observability_aws: true          # AMP workspace <resourcePrefix>-amp + scraper (AMG off, see observability-aws/values.yaml)
+  crossplane: true                 # the AMP Workspace is a Crossplane object
+  external_secrets: true
+  kro_manifests_hub: true          # PodIdentity graph
+  platform_manifests_bootstrap: true
+  image_prepuller: true
+  dcgm_exporter: false
+  # agent platform (switched on for all hubs by overlays/environments/control-plane): off
+  agent_platform: false
+  bifrost: false
+  agent_gateway: false
+  oam_components: false
+  otel_collector: false
+  langfuse: false
+  agent_core: false
+  amp_incident: false
+  aiops_agent: false
+  # not needed by the demo: off
+  argo_events: false
+  argo_rollouts: false
+  aws_resources: false
+  external_dns: false
+  grafana_operator: false
+  grafana_dashboards: false
+  grafana: false
+  devlake: false
+  jupyterhub: false
+  ray_operator: false
+  spark_operator: false
+  # kept as on the Paris hub
+  keycloak: true
+  backstage: true
+  argo_workflows: true
+  kargo: true

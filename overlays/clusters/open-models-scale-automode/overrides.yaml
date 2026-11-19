@@ -1,0 +1,67 @@
+# Copied from cloud-native-ai demo/ai-infra/open-models-scale/overlay/keda.yaml (MR !9) for the retest hub.
+# Definition of the KEDA add-on, for the overlay repository's overrides.yaml
+# (overlays/clusters/<cluster name>/overrides.yaml), next to the `enable_keda`
+# label set by addon-overrides.yaml. PEEKS did not ship a KEDA add-on at the
+# revision this demo was written against (check yours: git grep -il keda gitops/
+# in the PEEKS checkout), so the overlay defines it. A label alone creates no Application.
+#
+# NOT VALIDATED against a cluster in this repository yet. The chart keys were
+# read in the keda 2.19.0 chart (values.yaml and templates); re-check them if
+# you change defaultVersion.
+keda:
+  namespace: keda
+  chartName: keda
+  releaseName: keda
+  chartRepository: https://kedacore.github.io/charts
+  defaultVersion: "2.19.0"
+  annotationsAppSet:
+    argocd.argoproj.io/sync-wave: "3"
+  selector:
+    matchExpressions:
+      - key: enable_keda
+        operator: In
+        values: ["true"]
+  valuesObject:
+    # The operator's ServiceAccount, the one keda-amp-identity.yaml gives AWS
+    # permissions to (EKS Pod Identity: no IRSA)
+    serviceAccount:
+      operator:
+        create: true
+        name: keda-operator
+    podIdentity:
+      aws:
+        irsa:
+          enabled: false
+    resources:
+      operator:
+        requests: {cpu: 100m, memory: 256Mi}
+        limits: {memory: 512Mi}
+      metricServer:
+        requests: {cpu: 100m, memory: 256Mi}
+        limits: {memory: 512Mi}
+    # keda_* metrics of the operator on port 8080 (off by default)
+    prometheus:
+      operator:
+        enabled: true
+        port: 8080
+    # Keep KEDA off the GPU nodes (they are tainted nvidia.com/gpu): if your hub
+    # has no general-purpose node pool, check where the pods land.
+  # The scaledjobs CRD is larger than the 262144-byte client-side apply
+  # annotation limit: without server-side apply the operator crash-loops on the
+  # missing ScaledJob type (kedacore/keda#4740). This block REPLACES the add-on's
+  # default syncPolicy, so the automated/retry parts are repeated from PEEKS's
+  # appset-chart values: check them at your PEEKS revision.
+  syncPolicy:
+    automated:
+      selfHeal: true
+      allowEmpty: true
+      prune: false
+    retry:
+      limit: -1
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 10m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

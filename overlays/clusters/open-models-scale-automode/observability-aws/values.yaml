@@ -1,0 +1,5 @@
+# Amazon Managed Grafana is not offered in eu-west-3: without this the
+# observability-aws Application waits forever on the AMG workspace. AMP and its
+# scraper (what KEDA reads) have their own switches and stay on.
+amg:
+  enabled: false
