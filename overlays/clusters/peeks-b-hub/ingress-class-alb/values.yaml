@@ -1,0 +1,10 @@
+# Source-IP allowlist for the shared "platform" ALB of hub peeks-b-hub (peeks-b).
+# Sev2 V2465322851 remediation (2026-11-19): the ALB was open to 0.0.0.0/0 on 80/443.
+# IPv4 /32 only. Keep the hub's own NAT egress (REQUIRED: in-cluster SSO calls
+# Keycloak through this public ALB) and every spoke NAT running OAP addons that calls the hub.
+inboundCidrs:
+  - "100.21.84.8/32"       # peeks-b-hub VPC NAT egress (vpc-032023a850782d2fa) -- REQUIRED for in-cluster SSO
+  - "54.212.63.138/32"     # peeks-b-dev spoke NAT egress (vpc-0e5ef3a214ea74a49) -- OAP addons calling the hub
+# Browser access: Seb's workstation egress /32 is unknown tonight and not needed.
+# To grant it later, uncomment and set, then commit + sync:
+# extraInboundCidrs: "X.X.X.X/32"
