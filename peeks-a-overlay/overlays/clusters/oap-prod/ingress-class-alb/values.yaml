@@ -1,0 +1,11 @@
+# Source-IP allowlist for the "platform" ALB of spoke oap-prod (peeks-a, OAP PR #164 test).
+#
+# Placed BEFORE oap-prod exists so that its IngressClassParams is never rendered open:
+# with no inboundCidrs the chart omits inboundCIDRs and any Ingress would get an ALB open
+# to 0.0.0.0/0. Hard rule for this test: no internet-facing LB is ever open.
+#
+# Base = the hub NAT egress only. The spoke's OWN NAT egress is NOT listed here on purpose:
+# the chart appends clusterEgressCidrs (cluster-secret annotation nat_egress_cidrs, written
+# by the cluster provider) to a non-empty allowlist. Its presence is what this test checks.
+inboundCidrs:
+  - "44.228.251.53/32"     # peeks-hub VPC NAT egress

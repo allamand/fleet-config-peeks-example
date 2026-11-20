@@ -1,0 +1,11 @@
+# Source-IP allowlist for the "platform" ALB of spoke oap-dev (peeks-a).
+#
+# oap-dev has an internet-facing IngressClassParams "platform" with no allowlist and no
+# Ingress today, so no ALB exists. This file closes it in advance: if any addon (for
+# example from OAP PR #164) creates an Ingress on oap-dev, the ALB is restricted from the
+# first reconcile. Hard rule: no internet-facing LB is ever open to 0.0.0.0/0.
+#
+# Base = the hub NAT egress only; the spoke's own NAT egress is appended by the chart
+# from the cluster-secret annotation nat_egress_cidrs once the provider writes it.
+inboundCidrs:
+  - "44.228.251.53/32"     # peeks-hub VPC NAT egress
