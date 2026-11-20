@@ -28,37 +28,4 @@
 # reconcile time. That keeps a real 12-digit account number OUT of this public
 # repo. Same reasoning for domainName (inherited / per-env) and any ARNs.
 
-clusters:
-  peeks-a-dev:
-    clusterName: peeks-a-dev
-    tenant: default
-    environment: dev
-    provider: kro-ack
-    fleetMember: spoke
-    region: us-west-2
-    k8sVersion: "1.37"
-    enableGeneralPurposeNodePool: true
-    # Distinct /16 from peeks-b-dev (10.3) and from the hubs.
-    cidr:
-      vpcCidr: "10.1.0.0/16"
-      publicSubnet1Cidr: "10.1.1.0/24"
-      publicSubnet2Cidr: "10.1.2.0/24"
-      privateSubnet1Cidr: "10.1.11.0/24"
-      privateSubnet2Cidr: "10.1.12.0/24"
-
-  peeks-b-dev:
-    clusterName: peeks-b-dev
-    tenant: default
-    environment: dev
-    provider: kro-ack
-    fleetMember: spoke
-    region: us-west-2
-    k8sVersion: "1.37"
-    enableGeneralPurposeNodePool: true
-    # Distinct /16 from peeks-a-dev (10.1) and from the hubs.
-    cidr:
-      vpcCidr: "10.3.0.0/16"
-      publicSubnet1Cidr: "10.3.1.0/24"
-      publicSubnet2Cidr: "10.3.2.0/24"
-      privateSubnet1Cidr: "10.3.11.0/24"
-      privateSubnet2Cidr: "10.3.12.0/24"
+clusters: {}
