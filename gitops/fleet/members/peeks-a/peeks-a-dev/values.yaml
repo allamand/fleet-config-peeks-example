@@ -11,6 +11,8 @@ clusterName: peeks-a-dev
 mode: externalSecret
 externalSecret:
   enabled: true
+  # Cost: re-read <cluster>/config from Secrets Manager hourly (built-in 1m).
+  refreshInterval: 1h
 labels:
   environment: dev
   tenant: default

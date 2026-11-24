@@ -2,6 +2,11 @@
 # gitops/fleet/hub/values.yaml: the hub registers itself via externalSecret mode.
 externalSecret:
   enabled: true
+  # Cost: re-read the hub cluster config from Secrets Manager hourly (built-in 1m).
+  refreshInterval: 1h
+  annotations:
+    # Read by the kargo ApplicationSet (registry gitops.yaml) for kargo-admin-credentials.
+    external_secrets_refresh_interval: 1h
   labels:
     environment: control-plane
     tenant: control-plane

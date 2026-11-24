@@ -1,0 +1,4 @@
+# Cost: poll AWS Secrets Manager hourly instead of every 30s-5m (CloudTrail management events).
+# Keys added by feat/external-secrets-refresh-interval in the jupyterhub chart.
+externalSecrets:
+  refreshInterval: 1h
