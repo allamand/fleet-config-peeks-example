@@ -1,0 +1,7 @@
+# ExternalSecret refreshInterval, pinned explicitly to the chart's current built-in
+# values (no behaviour change). Tune per fleet here. Keys: otel-collector chart values.yaml.
+externalSecrets:
+  amp:
+    refreshInterval: 5m
+  langfuseOtelAuth:
+    refreshInterval: 1m

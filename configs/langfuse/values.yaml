@@ -1,0 +1,7 @@
+# ExternalSecret refreshInterval, pinned explicitly to the chart's current built-in
+# values (no behaviour change). Tune per fleet here. Keys: langfuse chart values.yaml.
+externalSecrets:
+  langfuseEncryption:
+    refreshInterval: 1m
+  langfuseKeycloakSecret:
+    refreshInterval: 5m

@@ -1,0 +1,4 @@
+# ExternalSecret refreshInterval, pinned explicitly to the chart's current built-in
+# values (no behaviour change). Tune per fleet here. Keys: spark-operator chart values.yaml.
+externalSecrets:
+  refreshInterval: 30s

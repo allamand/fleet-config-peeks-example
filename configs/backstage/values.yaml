@@ -1,0 +1,8 @@
+# ExternalSecret refreshInterval, pinned explicitly to the chart's current built-in
+# values (no behaviour change). Tune per fleet here. Keys: backstage chart values.yaml.
+externalSecrets:
+  refreshInterval: 30s          # oidc, postgres, session
+  gitCredentials:
+    refreshInterval: 5m
+  argocdCredentials:
+    refreshInterval: "0"        # fetch once, never refresh

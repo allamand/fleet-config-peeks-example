@@ -11,6 +11,8 @@ clusterName: peeks-a-dev
 mode: externalSecret
 externalSecret:
   enabled: true
+  # fleet-secret ExternalSecret refreshInterval, pinned to the chart's current 1m.
+  refreshInterval: 1m
 labels:
   environment: dev
   tenant: default
