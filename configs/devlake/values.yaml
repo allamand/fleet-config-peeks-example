@@ -1,4 +1,9 @@
-# Cost: poll AWS Secrets Manager hourly instead of every 30s-5m (CloudTrail management events).
-# Keys added by feat/external-secrets-refresh-interval in the devlake chart.
+# ExternalSecret refreshInterval, pinned explicitly to the chart's current built-in
+# values (no behaviour change). Tune per fleet here. Keys: devlake chart values.yaml.
 externalSecrets:
-  refreshInterval: 1h
+  refreshInterval: 1h           # devlake-encryption-secret, mysql-passwords
+  devlakeMysqlAuth:
+    refreshInterval: 1m
+pushSecrets:
+  mysqlEndpointPush:
+    refreshInterval: 30s        # PushSecret, bootstrap

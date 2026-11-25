@@ -1,4 +1,8 @@
-# Cost: poll AWS Secrets Manager hourly instead of every 30s-5m (CloudTrail management events).
-# Keys added by feat/external-secrets-refresh-interval in the backstage chart.
+# ExternalSecret refreshInterval, pinned explicitly to the chart's current built-in
+# values (no behaviour change). Tune per fleet here. Keys: backstage chart values.yaml.
 externalSecrets:
-  refreshInterval: 1h
+  refreshInterval: 30s          # oidc, postgres, session
+  gitCredentials:
+    refreshInterval: 5m
+  argocdCredentials:
+    refreshInterval: "0"        # fetch once, never refresh

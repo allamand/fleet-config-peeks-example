@@ -1,4 +1,7 @@
-# Cost: poll AWS Secrets Manager hourly instead of every 30s-5m (CloudTrail management events).
-# Keys added by feat/external-secrets-refresh-interval in the otel-collector chart.
+# ExternalSecret refreshInterval, pinned explicitly to the chart's current built-in
+# values (no behaviour change). Tune per fleet here. Keys: otel-collector chart values.yaml.
 externalSecrets:
-  refreshInterval: 1h
+  amp:
+    refreshInterval: 5m
+  langfuseOtelAuth:
+    refreshInterval: 1m

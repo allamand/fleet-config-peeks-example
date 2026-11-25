@@ -4,8 +4,8 @@ clusterName: peeks-b-dev
 mode: externalSecret
 externalSecret:
   enabled: true
-  # Cost: re-read <cluster>/config from Secrets Manager hourly (built-in 1m).
-  refreshInterval: 1h
+  # fleet-secret ExternalSecret refreshInterval, pinned to the chart's current 1m.
+  refreshInterval: 1m
 labels:
   environment: dev
   tenant: default
